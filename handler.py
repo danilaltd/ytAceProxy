@@ -1,5 +1,4 @@
 import asyncio
-from http.client import HTTPException
 import logging
 from aiohttp import web
 
@@ -29,20 +28,28 @@ async def handle_client(request: web.Request, channels: dict[str, Channel], chan
     client_id = id(response)
     async with ch.lock:
         ch.clients[client_id] = Client(response=response, queue=queue)
+        channel_stop_event = ch.stop_event
+        channel_stop_event.clear()
         total = len(ch.clients)
 
     logger.info(f"[{channel_name}] Client connected ({client_id}). Total: {total}")
 
     await ensure_producer(channel_name, channels, stop_event)
     try:
-        while not stop_event.is_set():
-            chunk = await queue.get()
+        while not stop_event.is_set() and not channel_stop_event.is_set():
+            try:
+                chunk = await asyncio.wait_for(queue.get(), 5)
+                queue.task_done()
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                continue
             await response.write(chunk)
 
-    except (ConnectionResetError, asyncio.CancelledError, RuntimeError, HTTPException) as e:
+    except (ConnectionResetError, asyncio.CancelledError, RuntimeError) as e:
         logger.info(f"[{channel_name}] client {client_id} disconnected: {e}")
     except Exception as e:
-        logger.exception(f"[{channel_name}] unexpected error for client {client_id}: {e}")
+        logger.error(f"[{channel_name}] unexpected error for client {client_id}: {e}")
     finally:
         async with ch.lock:
             ch.clients.pop(client_id, None)
@@ -67,11 +74,11 @@ async def handle_yt_dlp(request: web.Request, redirects: dict[str, RedirectChann
         return web.Response(status=404, text="Cannot get stream URL")
 
     return web.Response(
-    status=302,
-    headers={
-        "Location": url,
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*",
-        "Connection": "keep-alive", 
-    }
-)
+        status=302,
+        headers={
+            "Location": url,
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "*/*",
+            "Connection": "keep-alive",
+        }
+    )

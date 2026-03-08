@@ -13,6 +13,7 @@ class Channel:
     clients: dict[int, Client] = field(default_factory=lambda: {})
     producer: asyncio.Task[None] | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    stop_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 @dataclass
 class RedirectChannel:

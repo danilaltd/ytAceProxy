@@ -96,7 +96,7 @@ async def parallel_fill_redirects(
             url_to_names[url].append(name)
 
     tasks = {
-        url: asyncio.create_task(run_in_process_with_timeout (url, stop_event))
+        url: asyncio.create_task(run_in_process_with_timeout(url, stop_event))
         for url in url_to_names.keys()
     }
 
