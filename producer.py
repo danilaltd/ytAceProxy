@@ -22,6 +22,7 @@ async def stream_producer(channel_name: str, channels: dict[str, Channel], stop_
     ch = channels[channel_name]
 
     try_number: int = 0
+    timeout = aiohttp.ClientTimeout(sock_read=10)
     while not stop_event.is_set():
         async with ch.lock:
             has_clients = bool(ch.clients)
@@ -33,7 +34,7 @@ async def stream_producer(channel_name: str, channels: dict[str, Channel], stop_
             async with aiohttp.ClientSession(headers={"User-Agent": "proxy_ace/1.0"}) as session:
                 logger.info(f"[{channel_name}] Connecting to {url}")
                 try:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total = 10)) as resp:
+                    async with session.get(url, timeout=timeout) as resp:
                         if not (200 <= resp.status < 300):
                             logger.warning(f"[{channel_name}] upstream returned status {resp.status}")
                             raise RuntimeError(f"Upstream returned status {resp.status}")

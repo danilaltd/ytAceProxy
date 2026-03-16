@@ -60,7 +60,7 @@ async def run_in_process_with_timeout(url: str, stop_event: asyncio.Event, timeo
             if elapsed >= timeout:
                 p.terminate()
                 p.join(timeout=2)
-                raise asyncio.TimeoutError("task timeout")
+                raise asyncio.TimeoutError(f"{url}: task timeout")
 
             await asyncio.sleep(interval)
             elapsed += interval
@@ -68,7 +68,10 @@ async def run_in_process_with_timeout(url: str, stop_event: asyncio.Event, timeo
     finally:
         if p.is_alive():
             p.terminate()
-            p.join()
+            p.join(timeout=2)
+            if p.is_alive():
+                p.kill()
+                p.join()
 
 async def parallel_fill_redirects(
     redirect_dict: dict[str, str], 
