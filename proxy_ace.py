@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 from aiohttp import web
 from typing import Any, Coroutine, Dict, Protocol
@@ -6,7 +7,7 @@ import signal
 from watchdog.observers import Observer
 from watchdog.events import DirModifiedEvent, DirMovedEvent, FileModifiedEvent, FileMovedEvent, FileSystemEventHandler
 
-from .config import sync_channels, CHANNELS_FILE
+from .config import sync_channels, CHANNELS_FILE, update_eternal_channels
 from .handler import handle_client, handle_yt_dlp
 from .models import Channel, RedirectChannel 
 
@@ -29,7 +30,6 @@ class SyncChannelsCallback(Protocol):
         redirects: dict[str, RedirectChannel],
         redirects_lock: asyncio.Lock,
         stop_event: asyncio.Event,
-        full_update: bool = False,
     ) -> Coroutine[Any, Any, None]:
         ...
 
@@ -86,15 +86,40 @@ class ConfigWatcher(FileSystemEventHandler):
         if src.endswith(CHANNELS_FILE):
             self._schedule()
 
+class UpdateEternalChannelsCallback(Protocol):
+    def __call__(
+        self,
+        redirects: dict[str, RedirectChannel],
+        redirects_lock: asyncio.Lock,
+        stop_event: asyncio.Event,
+    ) -> Coroutine[Any, Any, None]:
+        ...
+
+async def daily_routine(coro: UpdateEternalChannelsCallback, target_hour: int = 3):
+    while True:
+        now = datetime.datetime.now()
+        target = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += datetime.timedelta(days=1)
+        
+        sleep_seconds = (target - now).total_seconds()
+        logger.info(f"next daily task in {sleep_seconds/3600:.2f} h")
+        
+        await asyncio.sleep(sleep_seconds)
+        
+        try:
+            await coro(redirects, redirects_lock, stop_event)
+        except Exception as e:
+            logger.error(f"Error on daily_routine: {e}")
 
 async def periodic_sync(stop_event: asyncio.Event):
     while not stop_event.is_set():
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=3600)
+            await asyncio.wait_for(stop_event.wait(), timeout=60)
             continue
         except asyncio.TimeoutError:
             pass
-        await sync_channels(channels, channels_lock, redirects, redirects_lock, stop_event, True)
+        await sync_channels(channels, channels_lock, redirects, redirects_lock, stop_event)
 
 
 app = web.Application()
@@ -114,8 +139,9 @@ async def main():
 
     loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
     loop.add_signal_handler(signal.SIGINT, handle_sigterm)
-    await sync_channels(channels, channels_lock, redirects, redirects_lock, stop_event, True)
+    await sync_channels(channels, channels_lock, redirects, redirects_lock, stop_event)
     asyncio.create_task(periodic_sync(stop_event))
+    asyncio.create_task(daily_routine(update_eternal_channels))
 
     event_handler = ConfigWatcher(sync_channels, channels, channels_lock, redirects, redirects_lock, loop, stop_event)
     observer = Observer()

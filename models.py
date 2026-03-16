@@ -19,3 +19,4 @@ class Channel:
 class RedirectChannel:
     url: str
     redirect_url: str
+    ttl: int

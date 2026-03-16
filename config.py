@@ -5,9 +5,10 @@ import json
 import os
 import asyncio
 import logging
+import time
 from .models import Channel, RedirectChannel
 from yt_dlp import YoutubeDL, parse_options
-from concurrent.futures import ThreadPoolExecutor
+import re
 
 QUEUE_MAX_SIZE = 25000
 CHANNELS_FILE: str = "/home/daniil/proxy_ace/channels.json"
@@ -76,28 +77,29 @@ async def run_in_process_with_timeout(url: str, stop_event: asyncio.Event, timeo
 async def parallel_fill_redirects(
     redirect_dict: dict[str, str], 
     redirects: dict[str, RedirectChannel], 
-    stop_event: asyncio.Event, 
-    full_update: bool
+    stop_event: asyncio.Event,
+    update_eternal_channels: bool = False
 ):
-    executor = ThreadPoolExecutor(max_workers=8)
-    
     results: dict[str, RedirectChannel] = {}
-    url_to_names: defaultdict[str,list[str]] = defaultdict(list)
+    url_to_names: defaultdict[str, list[str]] = defaultdict(list)
+    
+    now = time.time()
+    if update_eternal_channels:
+        active_cache = {res.url: res for res in redirects.values() if res.ttl != -1}
+    else:
+        active_cache = {res.url: res for res in redirects.values() if res.ttl > now}
     for name, url in redirect_dict.items():
         if not url:
             continue
-            
-        is_already_known = False
-        if not full_update:
-            for res in redirects.values():
-                if res.url == url:
-                    results[name] = res
-                    is_already_known = True
-                    break
-        
-        if full_update or not is_already_known:
-            url_to_names[url].append(name)
-
+        if url in active_cache:
+            results[name] = active_cache[url]
+            continue
+        url_to_names[url].append(name)
+    
+    print(len(url_to_names))
+    for c in redirects.values():
+        print(f"ttl {c.ttl} now {now}")
+    
     tasks = {
         url: asyncio.create_task(run_in_process_with_timeout(url, stop_event))
         for url in url_to_names.keys()
@@ -109,11 +111,12 @@ async def parallel_fill_redirects(
         except Exception as e:
             logger.error(f"Error fetching: {e}")
             continue
-        ch = RedirectChannel(url=url, redirect_url=url_redirect)
+        match = re.search(r"(expire|validto)(=|/)(\d{10})", url_redirect)
+        timestamp = int(match.group(3) if match else -1)
+        ch = RedirectChannel(url=url, redirect_url=url_redirect, ttl=timestamp)
         for name in url_to_names[url]:
             results[name] = ch
             logger.info(f"Link for {name} ({url}): {url_redirect}")
-    executor.shutdown(wait=False)
     return results
 
 def load_channels_sync() -> dict[str, dict[str, str]]:
@@ -136,8 +139,8 @@ def load_channels_sync() -> dict[str, dict[str, str]]:
 async def load_channels() -> dict[str, dict[str, str]]:
     return await asyncio.to_thread(load_channels_sync)
 
-async def sync_channels(channels: dict[str, Channel], channels_lock: asyncio.Lock, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event, full_update: bool = False):
-    logger.info(f"start sync, full upd: {full_update}")
+async def sync_channels(channels: dict[str, Channel], channels_lock: asyncio.Lock, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+    logger.info(f"start sync")
     config = await load_channels()
     ace_dict: dict[str, str] = config["ace"]
     redirect_dict: dict[str, str] = config["yt-dlp"]
@@ -165,10 +168,18 @@ async def sync_channels(channels: dict[str, Channel], channels_lock: asyncio.Loc
                 if chan.producer and not chan.producer.done():
                     chan.producer.cancel()
 
-    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event, full_update)
+    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event)
     async with redirects_lock:
-        if full_update: 
-            redirects.clear()
         redirects.update(updates)
 
     logger.info("end sync")
+
+async def update_eternal_channels(redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+    logger.info(f"start update_eternal_channels")
+    config = await load_channels()
+    redirect_dict: dict[str, str] = config["yt-dlp"]
+    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event, True)
+    async with redirects_lock:
+        redirects.clear()
+        redirects.update(updates)
+    logger.info(f"end update_eternal_channels")
