@@ -11,7 +11,6 @@ from yt_dlp import YoutubeDL, parse_options
 import re
 
 MAX_PROCESSES = 2
-QUEUE_MAX_SIZE = 25000
 CHANNELS_FILE: str = "/home/daniil/proxy_ace/channels.json"
 
 logger = logging.getLogger(__name__)
@@ -97,6 +96,11 @@ async def parallel_fill_redirects(
             continue
         url_to_names[url].append(name)
     
+    logger.info(len(url_to_names))
+    for c in redirects.values():
+        logger.info(f"ttl {c.ttl} now {now}")
+    
+
     async def bounded_fetch(url: str):
         async with sem:
             return await run_in_process_with_timeout(url, stop_event)

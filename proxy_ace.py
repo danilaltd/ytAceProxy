@@ -1,6 +1,11 @@
 import asyncio
+from dataclasses import asdict
 import datetime
+import json
 import logging
+import time
+import debugpy
+import os
 from aiohttp import web
 from typing import Any, Coroutine, Dict, Protocol
 import signal
@@ -121,6 +126,26 @@ async def periodic_sync(stop_event: asyncio.Event):
             pass
         await sync_channels(channels, channels_lock, redirects, redirects_lock, stop_event)
 
+def load_redirects(dump_filename: str="proxy_ace/redirects_dump.json") -> dict[str, RedirectChannel]:
+    try:
+        with open(dump_filename, "r") as f:
+            data = json.load(f)
+        
+        now = time.time()
+        loaded_redirects: dict[str, RedirectChannel] = {}
+        
+        for k, v in data.items():
+            if v['ttl'] == -1 or v['ttl'] > now:
+                loaded_redirects[k] = RedirectChannel(**v)
+        
+        return loaded_redirects
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_redirects(redirects: dict[str, RedirectChannel], dump_filename: str="proxy_ace/redirects_dump.json"):
+    data = {k: asdict(v) for k, v in redirects.items()}
+    with open(dump_filename, "w") as f:
+        json.dump(data, f, indent=4)
 
 app = web.Application()
 async def ace_handler(request: web.Request) -> web.Response | web.StreamResponse:
@@ -136,13 +161,12 @@ async def main():
     loop = asyncio.get_running_loop()
     def handle_sigterm():
         loop.call_soon_threadsafe(stop_event.set)
-
+    redirects.update(load_redirects())
     loop.add_signal_handler(signal.SIGTERM, handle_sigterm)
     loop.add_signal_handler(signal.SIGINT, handle_sigterm)
     await sync_channels(channels, channels_lock, redirects, redirects_lock, stop_event)
     asyncio.create_task(periodic_sync(stop_event))
     asyncio.create_task(daily_routine(update_eternal_channels))
-
     event_handler = ConfigWatcher(sync_channels, channels, channels_lock, redirects, redirects_lock, loop, stop_event)
     observer = Observer()
     observer.schedule(event_handler, CHANNELS_FILE, recursive=False)
@@ -158,7 +182,11 @@ async def main():
     finally:
         observer.stop()
         observer.join()
+        save_redirects(redirects)
     await runner.cleanup()
 
 if __name__ == "__main__":
+    port = os.environ.get('PYTHON_DEBUG_PORT')
+    if port:
+        debugpy.listen(("127.0.0.1", int(port)))
     asyncio.run(main())

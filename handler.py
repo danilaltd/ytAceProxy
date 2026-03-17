@@ -7,7 +7,7 @@ from .producer import ensure_producer
 
 logger = logging.getLogger(__name__)
 
-QUEUE_MAX_SIZE = 25000
+QUEUE_MAX_SIZE = 5
 
 async def handle_client(request: web.Request, channels: dict[str, Channel], channels_lock: asyncio.Lock, stop_event: asyncio.Event):
     channel_name = request.match_info["channel"]

@@ -48,30 +48,25 @@ async def stream_producer(channel_name: str, channels: dict[str, Channel], stop_
 
                             async with ch.lock:
                                 items = list(ch.clients.items())
-
-                            disconnected: list[int] = []
+                            if len(items) == 0:
+                                break
                             for client_id, ctx in items:
                                 q = ctx.queue
                                 try:
                                     q.put_nowait(raw_chunk)
                                 except asyncio.QueueFull:
                                     try:
-                                        q.get_nowait()
+                                        q.get_nowait() 
                                     except asyncio.QueueEmpty:
                                         pass
                                     try:
                                         q.put_nowait(raw_chunk)
+                                        logger.warning(f"[{channel_name}] queue was full for client {client_id}; but its ok after dropping chunk")
                                     except asyncio.QueueFull:
-                                        logger.warning(f"[{channel_name}] queue still full for client {client_id}; dropping client")
-                                        disconnected.append(client_id)
+                                        logger.warning(f"[{channel_name}] queue still full after dropping chunk for client {client_id}")
                                 except Exception as e:
                                     logger.exception(f"[{channel_name}] Error putting chunk to client {client_id}: {e}")
-                                    disconnected.append(client_id)
 
-                            if disconnected:
-                                async with ch.lock:
-                                    for cid in disconnected:
-                                        ch.clients.pop(cid, None)
                 except asyncio.TimeoutError as e: 
                     logger.error(f"[{channel_name}] timeout error from upstream: {e}")
                     raise RuntimeError("timeout error from upstream") from e
