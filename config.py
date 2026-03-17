@@ -10,6 +10,7 @@ from .models import Channel, RedirectChannel
 from yt_dlp import YoutubeDL, parse_options
 import re
 
+MAX_PROCESSES = 2
 QUEUE_MAX_SIZE = 25000
 CHANNELS_FILE: str = "/home/daniil/proxy_ace/channels.json"
 
@@ -87,7 +88,7 @@ async def parallel_fill_redirects(
     if update_eternal_channels:
         active_cache = {res.url: res for res in redirects.values() if res.ttl != -1}
     else:
-        active_cache = {res.url: res for res in redirects.values() if res.ttl > now}
+        active_cache = {res.url: res for res in redirects.values() if (res.ttl > now or res.ttl == -1)}
     for name, url in redirect_dict.items():
         if not url:
             continue
@@ -96,12 +97,13 @@ async def parallel_fill_redirects(
             continue
         url_to_names[url].append(name)
     
-    print(len(url_to_names))
-    for c in redirects.values():
-        print(f"ttl {c.ttl} now {now}")
-    
+    async def bounded_fetch(url: str):
+        async with sem:
+            return await run_in_process_with_timeout(url, stop_event)
+
+    sem = asyncio.Semaphore(MAX_PROCESSES)
     tasks = {
-        url: asyncio.create_task(run_in_process_with_timeout(url, stop_event))
+        url: asyncio.create_task(bounded_fetch(url))
         for url in url_to_names.keys()
     }
 
@@ -111,7 +113,7 @@ async def parallel_fill_redirects(
         except Exception as e:
             logger.error(f"Error fetching: {e}")
             continue
-        match = re.search(r"(expire|validto)(=|/)(\d{10})", url_redirect)
+        match = re.search(r"(expire|validto|exp)(=|/)(\d{10})", url_redirect)
         timestamp = int(match.group(3) if match else -1)
         ch = RedirectChannel(url=url, redirect_url=url_redirect, ttl=timestamp)
         for name in url_to_names[url]:
