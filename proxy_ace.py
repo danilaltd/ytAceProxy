@@ -13,7 +13,7 @@ from watchdog.observers import Observer
 from watchdog.events import DirModifiedEvent, DirMovedEvent, FileModifiedEvent, FileMovedEvent, FileSystemEventHandler
 
 from .config import sync_channels, CHANNELS_FILE, update_eternal_channels
-from .handler import handle_client, handle_yt_dlp
+from .handler import handle_client, handle_yt_dlp, handle_yt_dlp_upd
 from .models import Channel, RedirectChannel 
 
 LISTEN_PORT = 8081
@@ -154,8 +154,12 @@ async def ace_handler(request: web.Request) -> web.Response | web.StreamResponse
 async def yt_dlp_handler(request: web.Request):
     return await handle_yt_dlp(request, redirects, redirects_lock)
 
+async def yt_dlp_upd_handler(request: web.Request):
+    return await handle_yt_dlp_upd(request, redirects, redirects_lock, stop_event)
+
 app.router.add_get("/ace/{channel}", ace_handler)
 app.router.add_get("/yt_dlp/{channel}", yt_dlp_handler)
+app.router.add_get("/yt_dlp/{channel}/upd", yt_dlp_upd_handler)
 
 async def main():
     loop = asyncio.get_running_loop()

@@ -2,6 +2,7 @@ import asyncio
 import logging
 from aiohttp import web
 
+from .config import update_special_channel
 from .models import Channel, Client, RedirectChannel
 from .producer import ensure_producer
 
@@ -81,4 +82,13 @@ async def handle_yt_dlp(request: web.Request, redirects: dict[str, RedirectChann
             "Accept": "*/*",
             "Connection": "keep-alive",
         }
+    )
+
+async def handle_yt_dlp_upd(request: web.Request, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+    channel = request.match_info["channel"]
+    await update_special_channel(channel, redirects, redirects_lock, stop_event)
+    return web.Response(
+        text=f"Channel '{channel}' updated successfully",
+        content_type="text/plain",
+        status=200
     )

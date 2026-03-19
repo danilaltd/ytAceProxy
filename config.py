@@ -78,8 +78,11 @@ async def parallel_fill_redirects(
     redirect_dict: dict[str, str], 
     redirects: dict[str, RedirectChannel], 
     stop_event: asyncio.Event,
-    update_eternal_channels: bool = False
+    update_eternal_channels: bool = False,
+    force_update: list[str]|None = None
 ):
+    if force_update is None:
+        force_update = []
     results: dict[str, RedirectChannel] = {}
     url_to_names: defaultdict[str, list[str]] = defaultdict(list)
     
@@ -91,16 +94,11 @@ async def parallel_fill_redirects(
     for name, url in redirect_dict.items():
         if not url:
             continue
-        if url in active_cache:
+        if (name not in force_update) and (url in active_cache):
             results[name] = active_cache[url]
             continue
         url_to_names[url].append(name)
     
-    logger.info(len(url_to_names))
-    for c in redirects.values():
-        logger.info(f"ttl {c.ttl} now {now}")
-    
-
     async def bounded_fetch(url: str):
         async with sem:
             return await run_in_process_with_timeout(url, stop_event)
@@ -184,8 +182,17 @@ async def update_eternal_channels(redirects: dict[str, RedirectChannel], redirec
     logger.info(f"start update_eternal_channels")
     config = await load_channels()
     redirect_dict: dict[str, str] = config["yt-dlp"]
-    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event, True)
+    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event, update_eternal_channels=True)
     async with redirects_lock:
         redirects.clear()
         redirects.update(updates)
     logger.info(f"end update_eternal_channels")
+
+async def update_special_channel(channel: str, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+    logger.info(f"start update_special_channel")
+    config = await load_channels()
+    redirect_dict: dict[str, str] = config["yt-dlp"]
+    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event, force_update=[channel])
+    async with redirects_lock:
+        redirects.update(updates)
+    logger.info(f"end update_special_channel")
