@@ -2,18 +2,19 @@ import asyncio
 import logging
 from aiohttp import web
 
+from .state import AppContext
 from .config import update_special_channel
-from .models import Channel, Client, RedirectChannel
+from .models import Client
 from .producer import ensure_producer
 
 logger = logging.getLogger(__name__)
 
 QUEUE_MAX_SIZE = 5
 
-async def handle_client(request: web.Request, channels: dict[str, Channel], channels_lock: asyncio.Lock, stop_event: asyncio.Event):
+async def handle_client(request: web.Request, appContext: AppContext):
     channel_name = request.match_info["channel"]
-    async with channels_lock:
-        ch = channels.get(channel_name)
+    async with appContext.channels_lock:
+        ch = appContext.channels.get(channel_name)
     if ch is None:
         return web.Response(status=404, text="Channel not found")
 
@@ -35,7 +36,8 @@ async def handle_client(request: web.Request, channels: dict[str, Channel], chan
 
     logger.info(f"[{channel_name}] Client connected ({client_id}). Total: {total}")
 
-    await ensure_producer(channel_name, channels, stop_event)
+    await ensure_producer(channel_name, appContext)
+    stop_event = appContext.stop_event
     try:
         while not stop_event.is_set() and not channel_stop_event.is_set():
             try:
@@ -63,10 +65,10 @@ async def handle_client(request: web.Request, channels: dict[str, Channel], chan
 
     return response
 
-async def handle_yt_dlp(request: web.Request, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock):
+async def handle_yt_dlp(request: web.Request, appContext: AppContext):
     channel = request.match_info["channel"]
-    async with redirects_lock:
-        channel_obj = redirects.get(channel) or redirects.get("placeholder")
+    async with appContext.redirects_lock:
+        channel_obj = appContext.redirects.get(channel) or appContext.redirects.get("placeholder")
         if channel_obj is None:
             return web.Response(status=404)
 
@@ -84,9 +86,9 @@ async def handle_yt_dlp(request: web.Request, redirects: dict[str, RedirectChann
         }
     )
 
-async def handle_yt_dlp_upd(request: web.Request, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+async def handle_yt_dlp_upd(request: web.Request, appContext: AppContext):
     channel = request.match_info["channel"]
-    await update_special_channel(channel, redirects, redirects_lock, stop_event)
+    await update_special_channel(channel, appContext)
     return web.Response(
         text=f"Channel '{channel}' updated successfully",
         content_type="text/plain",

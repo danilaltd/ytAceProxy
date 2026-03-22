@@ -1,3 +1,4 @@
+import datetime
 from multiprocessing  import Process, Queue
 from collections import defaultdict
 import hashlib
@@ -6,6 +7,10 @@ import os
 import asyncio
 import logging
 import time
+from typing import Any, Coroutine, Protocol
+from watchdog.events import DirModifiedEvent, DirMovedEvent, FileModifiedEvent, FileMovedEvent, FileSystemEventHandler
+
+from .state import AppContext
 from .models import Channel, RedirectChannel
 from yt_dlp import YoutubeDL, parse_options
 import re
@@ -143,12 +148,13 @@ def load_channels_sync() -> dict[str, dict[str, str]]:
 async def load_channels() -> dict[str, dict[str, str]]:
     return await asyncio.to_thread(load_channels_sync)
 
-async def sync_channels(channels: dict[str, Channel], channels_lock: asyncio.Lock, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+async def sync_channels(appContext: AppContext):
     logger.info(f"start sync")
     config = await load_channels()
     ace_dict: dict[str, str] = config["ace"]
     redirect_dict: dict[str, str] = config["yt-dlp"]
-    async with channels_lock:
+    async with appContext.channels_lock:
+        channels = appContext.channels
         for name, url in ace_dict.items():
             head = 'http://localhost:6878/ace/getstream?id='
             pid = f"&pid=splitter_{hashlib.sha1(url.encode()).hexdigest()[:10]}"
@@ -172,27 +178,117 @@ async def sync_channels(channels: dict[str, Channel], channels_lock: asyncio.Loc
                 if chan.producer and not chan.producer.done():
                     chan.producer.cancel()
 
-    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event)
-    async with redirects_lock:
+    redirects = appContext.redirects
+    updates = await parallel_fill_redirects(redirect_dict, redirects, appContext.stop_event)
+    async with appContext.redirects_lock:
         redirects.update(updates)
 
     logger.info("end sync")
 
-async def update_eternal_channels(redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+async def update_eternal_channels(appContext: AppContext):
     logger.info(f"start update_eternal_channels")
     config = await load_channels()
     redirect_dict: dict[str, str] = config["yt-dlp"]
-    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event, update_eternal_channels=True)
-    async with redirects_lock:
+    redirects = appContext.redirects
+    updates = await parallel_fill_redirects(redirect_dict, redirects, appContext.stop_event, update_eternal_channels=True)
+    async with appContext.redirects_lock:
         redirects.clear()
         redirects.update(updates)
     logger.info(f"end update_eternal_channels")
 
-async def update_special_channel(channel: str, redirects: dict[str, RedirectChannel], redirects_lock: asyncio.Lock, stop_event: asyncio.Event):
+async def update_special_channel(channel: str, appContext: AppContext):
     logger.info(f"start update_special_channel")
     config = await load_channels()
     redirect_dict: dict[str, str] = config["yt-dlp"]
-    updates = await parallel_fill_redirects(redirect_dict, redirects, stop_event, force_update=[channel])
-    async with redirects_lock:
+    redirects: dict[str, RedirectChannel] = appContext.redirects
+    updates = await parallel_fill_redirects(redirect_dict, redirects, appContext.stop_event, force_update=[channel])
+    async with appContext.redirects_lock:
         redirects.update(updates)
     logger.info(f"end update_special_channel")
+
+class SyncChannelsCallback(asyncio.Protocol):
+    def __call__(
+        self,
+        appContext: AppContext,
+    ) -> Coroutine[Any, Any, None]:
+        ...
+
+class ConfigWatcher(FileSystemEventHandler):
+    def __init__(self, callback: SyncChannelsCallback, appContext: AppContext, loop: asyncio.AbstractEventLoop):
+        self.callback = callback
+        self.appContext = appContext
+        self.loop = loop
+        self._debounce_handle = None
+
+    def _trigger(self):
+        self._debounce_handle = None
+        self.loop.call_soon_threadsafe(
+            lambda: asyncio.create_task(
+                self.callback(
+                    self.appContext,
+                )
+            )
+        )
+
+    def _schedule(self):
+        if self._debounce_handle is not None:
+            self._debounce_handle.cancel()
+
+        def schedule_inside_loop():
+            self._debounce_handle = self.loop.call_later(0.1, self._trigger)
+
+        self.loop.call_soon_threadsafe(schedule_inside_loop)
+
+    def on_modified(self, event: DirModifiedEvent | FileModifiedEvent):
+        raw = event.src_path 
+        if isinstance(raw, str):
+            src = raw
+        else:
+            src = bytes(raw).decode("utf-8", errors="replace")
+        if src.endswith(CHANNELS_FILE):
+            self._schedule()
+
+    def on_moved(self, event: DirMovedEvent | FileMovedEvent):
+        raw = event.src_path 
+        if isinstance(raw, str):
+            src = raw
+        else:
+            src = bytes(raw).decode("utf-8", errors="replace")
+        if src.endswith(CHANNELS_FILE):
+            self._schedule()
+
+
+async def periodic_sync(appContext: AppContext):
+    while not appContext.stop_event.is_set():
+        try:
+            await asyncio.wait_for(appContext.stop_event.wait(), timeout=60)
+            continue
+        except asyncio.TimeoutError:
+            pass
+        await sync_channels(appContext)
+
+
+class UpdateEternalChannelsCallback(Protocol):
+    def __call__(
+        self,
+        appContext: AppContext,
+    ) -> Coroutine[Any, Any, None]:
+        ...
+
+
+async def daily_routine(coro: UpdateEternalChannelsCallback, appContext: AppContext, target_hour: int = 3):
+    while True:
+        now = datetime.datetime.now()
+        target = now.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += datetime.timedelta(days=1)
+
+        sleep_seconds = (target - now).total_seconds()
+        logger.info(f"next daily task in {sleep_seconds/3600:.2f} h")
+
+        await asyncio.sleep(sleep_seconds)
+
+        try:
+            await coro(appContext)
+        except Exception as e:
+            logger.error(f"Error on daily_routine: {e}")

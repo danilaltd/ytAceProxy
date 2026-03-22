@@ -3,26 +3,29 @@ import aiohttp
 from aiohttp.web_exceptions import HTTPBadRequest
 from aiohttp.client_exceptions import ClientResponseError
 import logging
-from .models import Channel
+
+from .state import AppContext
 
 logger = logging.getLogger(__name__)
 
-async def ensure_producer(channel_name: str, channels: dict[str, Channel], stop_event: asyncio.Event):
-    ch = channels.get(channel_name)
+async def ensure_producer(channel_name: str, appContext: AppContext):
+    ch = appContext.channels.get(channel_name)
     if ch is None:
         return
     async with ch.lock:
         if ch.producer is None or ch.producer.done():
-            ch.producer = asyncio.create_task(stream_producer(channel_name, channels, stop_event))
+            ch.producer = asyncio.create_task(stream_producer(channel_name, appContext))
 
 
-async def stream_producer(channel_name: str, channels: dict[str, Channel], stop_event: asyncio.Event):
+async def stream_producer(channel_name: str, appContext: AppContext):
+    channels = appContext.channels
     if channel_name not in channels:
         return
     ch = channels[channel_name]
 
     try_number: int = 0
     timeout = aiohttp.ClientTimeout(sock_read=10)
+    stop_event = appContext.stop_event
     while not stop_event.is_set():
         async with ch.lock:
             has_clients = bool(ch.clients)
