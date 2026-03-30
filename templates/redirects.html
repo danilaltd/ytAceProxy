@@ -1,0 +1,19 @@
+<h1>ACE Channels</h1>
+<a href="{{ app_prefix }}{{ url_for('redirect_add') }}">Add New</a>
+<table border="1">
+    <tr><th>ID</th><th>Name</th><th>URL</th><th>Redirect</th><th>ttl</th><th>created_at</th><th>Actions</th></tr>
+    {% for ch in redirects %}
+    <tr>
+        <td>{{ ch.id }}</td>
+        <td>{{ ch.name }}</td>
+        <td>{{ ch.url }}</td>
+        <td>{{ ch.redirect_url }}</td>
+        <td>{{ ch.ttl }}</td>
+        <td>{{ ch.created_at }}</td>
+        <td>
+            <a href="{{ app_prefix }}{{ url_for('redirect_edit', id=ch.id) }}">Edit</a>
+            <a href="{{ app_prefix }}{{ url_for('redirect_del',  id=ch.id) }}" onclick="return confirm('Delete?')">Delete</a>
+        </td>
+    </tr>
+    {% endfor %}
+</table>

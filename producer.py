@@ -9,16 +9,15 @@ from .state import AppContext
 logger = logging.getLogger(__name__)
 
 async def ensure_producer(channel_name: str, appContext: AppContext):
-    ch = appContext.channels.get(channel_name)
+    ch = appContext.channels_streaming_now.get(channel_name)
     if ch is None:
         return
     async with ch.lock:
         if ch.producer is None or ch.producer.done():
             ch.producer = asyncio.create_task(stream_producer(channel_name, appContext))
 
-
 async def stream_producer(channel_name: str, appContext: AppContext):
-    channels = appContext.channels
+    channels = appContext.channels_streaming_now
     if channel_name not in channels:
         return
     ch = channels[channel_name]
@@ -97,3 +96,12 @@ async def stream_producer(channel_name: str, appContext: AppContext):
         logger.info(f"[{channel_name}] cleared producer.")
         ch.stop_event.set()
         ch.producer = None
+    
+    channels_lock = appContext.channels_lock
+    while True:
+        async with channels_lock:
+            if len(ch.clients) == 0:
+                appContext.channels_streaming_now.pop(channel_name, None)
+                break
+        logger.info(f"waiting to len(ch.clients) == 0 for {channel_name}")
+        await asyncio.sleep(0.5)

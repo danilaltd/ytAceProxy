@@ -1,22 +1,41 @@
 import asyncio
+import hashlib
 import logging
 from aiohttp import web
 
-from .state import AppContext
+from .repo import get_redirect_url, get_streaming_channel_url
 from .config import update_special_channel
-from .models import Client
+from .models import Channel, Client
 from .producer import ensure_producer
+from .state import AppContext, appContext
 
 logger = logging.getLogger(__name__)
 
 QUEUE_MAX_SIZE = 5
 
+async def ace_handler(request: web.Request) -> web.Response | web.StreamResponse:
+    return await handle_client(request, appContext)
+
+async def yt_dlp_handler(request: web.Request):
+    return await handle_yt_dlp(request, appContext)
+
+async def yt_dlp_upd_handler(request: web.Request):
+    return await handle_yt_dlp_upd(request, appContext)
+
+
 async def handle_client(request: web.Request, appContext: AppContext):
     channel_name = request.match_info["channel"]
     async with appContext.channels_lock:
-        ch = appContext.channels.get(channel_name)
-    if ch is None:
-        return web.Response(status=404, text="Channel not found")
+        ch = appContext.channels_streaming_now.get(channel_name)
+        if ch is None:
+            channel_url = await get_streaming_channel_url(channel_name)
+            if channel_url is None:
+                return web.Response(status=404, text="Channel not found")
+            head = 'http://localhost:6878/ace/getstream?id='
+            pid = f"&pid=splitter_{hashlib.sha1(channel_url.encode()).hexdigest()[:10]}"
+            channel_url = head + channel_url + pid
+            ch = Channel(url=channel_url)
+            appContext.channels_streaming_now[channel_name] = ch
 
     response = web.StreamResponse(
         status=200,
@@ -65,26 +84,32 @@ async def handle_client(request: web.Request, appContext: AppContext):
 
     return response
 
-async def handle_yt_dlp(request: web.Request, appContext: AppContext):
-    channel = request.match_info["channel"]
-    async with appContext.redirects_lock:
-        channel_obj = appContext.redirects.get(channel) or appContext.redirects.get("placeholder")
-        if channel_obj is None:
-            return web.Response(status=404)
-
-        url = channel_obj.redirect_url
-    if not url:
+def redirect_response(redirect_url: str) -> web.Response:
+    if not redirect_url:
         return web.Response(status=404, text="Cannot get stream URL")
 
     return web.Response(
         status=302,
         headers={
-            "Location": url,
+            "Location": redirect_url,
             "User-Agent": "Mozilla/5.0",
             "Accept": "*/*",
             "Connection": "keep-alive",
         }
     )
+
+async def handle_yt_dlp(request: web.Request, appContext: AppContext):
+    channel_name = request.match_info["channel"]
+    
+    redirect_url = await get_redirect_url(channel_name)
+    if redirect_url is not None: 
+        return redirect_response(redirect_url)
+
+    redirect_url = await get_redirect_url("placeholder")
+    if redirect_url is not None:
+        return redirect_response(redirect_url)
+    
+    return web.Response(status=404)
 
 async def handle_yt_dlp_upd(request: web.Request, appContext: AppContext):
     channel = request.match_info["channel"]

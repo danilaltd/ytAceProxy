@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 import asyncio
+import time
+from typing import Optional
 
 from aiohttp.web import StreamResponse
 
@@ -17,6 +19,10 @@ class Channel:
 
 @dataclass
 class RedirectChannel:
+    name: str
     url: str
-    redirect_url: str
-    ttl: int
+    redirect_url: Optional[str]
+    ttl: Optional[int] = None
+    created_at: Optional[float] = time.time()
+    id: Optional[int] = None
+    dirty: Optional[bool] = False

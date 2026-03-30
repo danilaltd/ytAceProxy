@@ -1,0 +1,17 @@
+<h1>{{ title }}</h1>
+<form method="post">
+    <div>
+        {{ form.name.label }}: {{ form.name() }}
+        {% if form.name.errors %}<span style="color:red">{{ form.name.errors[0] }}</span>{% endif %}
+    </div>
+    <div>
+        {{ form.url.label }}: {{ form.url() }}
+        {% if form.url.errors %}<span style="color:red">{{ form.url.errors[0] }}</span>{% endif %}
+    </div>
+    <div>
+        {{ form.redirect_url.label }}: {{ form.redirect_url() }}
+        {% if form.redirect_url.errors %}<span style="color:red">{{ form.redirect_url.errors[0] }}</span>{% endif %}
+    </div>
+    <button type="submit">Save</button>
+</form>
+<a href="{{ app_prefix }}/admin/redirects">Back</a>

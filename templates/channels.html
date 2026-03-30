@@ -1,0 +1,16 @@
+<h1>ACE Channels</h1>
+<a href="{{ app_prefix }}{{ url_for('ace_add') }}">Add New</a>
+<table border="1">
+    <tr><th>ID</th><th>Name</th><th>URL</th><th>Actions</th></tr>
+    {% for ch in ace %}
+    <tr>
+        <td>{{ ch.id }}</td>
+        <td>{{ ch.name }}</td>
+        <td>{{ ch.url }}</td>
+        <td>
+            <a href="{{ app_prefix }}{{ url_for('ace_edit', id=ch.id) }}">Edit</a>
+            <a href="{{ app_prefix }}{{ url_for('ace_del',  id=ch.id) }}" onclick="return confirm('Delete?')">Delete</a>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
