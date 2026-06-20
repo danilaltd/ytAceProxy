@@ -11,7 +11,7 @@ from .state import AppContext, appContext
 
 logger = logging.getLogger(__name__)
 
-QUEUE_MAX_SIZE = 5
+QUEUE_MAX_SIZE = 50
 
 async def ace_handler(request: web.Request) -> web.Response | web.StreamResponse:
     return await handle_client(request, appContext)

@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict
 
 import aiohttp_jinja2
@@ -103,6 +104,7 @@ async def add_redirect_handler(request: web.Request):
 
     if form.validate():
         await add_redirect(form.name.data, form.url.data, form.redirect_url.data, None)
+        asyncio.create_task(sync_channels())
         raise web.HTTPFound("/admin/redirects")
     
     return aiohttp_jinja2.render_template("redirect_form.html", request, {"form": form, "title": "Add Channel"})
@@ -147,5 +149,5 @@ async def delete_redirect_handler(request: web.Request):
 
 @routes.get("/admin/redirects/sync", name="redirect_sync")
 async def sync_redirects_handler(request: web.Request):
-    await sync_channels()
+    asyncio.create_task(sync_channels())
     raise web.HTTPFound("/admin/redirects")

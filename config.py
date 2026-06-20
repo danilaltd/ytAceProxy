@@ -8,7 +8,7 @@ from typing import Any, Coroutine, Protocol
 
 from .repo import get_redirects, update_redirects
 
-from .state import appContext
+from .state import AppContext, appContext
 from .models import RedirectChannel
 from yt_dlp import YoutubeDL, parse_options
 import re

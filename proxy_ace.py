@@ -2,7 +2,6 @@ import asyncio
 import logging
 import aiohttp_jinja2
 import jinja2
-import debugpy
 import os
 from aiohttp import web
 from aiohttp.web_request import Request
@@ -81,5 +80,6 @@ async def main():
 if __name__ == "__main__":
     port = os.environ.get('PYTHON_DEBUG_PORT')
     if port:
+        import debugpy
         debugpy.listen(("127.0.0.1", int(port)))
     asyncio.run(main())
