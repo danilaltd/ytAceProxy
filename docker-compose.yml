@@ -1,0 +1,42 @@
+services:
+  manager:
+    image: ${MANAGER_IMAGE:-ace-ytdlp-manager}
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8081:8081"
+    volumes:
+      - ${DB_PATH:-/var/lib/ace-ytdlp-manager}:/app/data
+    restart: ${RESTART_POLICY:-always}
+
+  acestream:
+    image: ghcr.io/martinbjeldbak/acestream-http-proxy
+    ports:
+      - "0.0.0.0:6878:6878"
+      - "8621:8621"
+    volumes:
+      - /var/lib/ace-ytdlp-manager/acestream-cache/:/root/.ACEStream/.acestream_cache/
+    restart: ${RESTART_POLICY_ACELINK:-always}
+
+  acexy:
+    image: ghcr.io/javinator9889/acexy:0.2.2
+    restart: unless-stopped
+    ports:
+      - 8080:8080/tcp
+    environment:
+      ACEXY_LISTEN_ADDR: ":8080"            # Listen on port 8080
+      ACEXY_SCHEME: "http"                  # Use HTTP
+      ACEXY_HOST: "acestream"               # Host is "acestream" or the name of the AceStream service
+      ACEXY_PORT: "6878"                    # Port is 6878
+      ACEXY_M3U8_STREAM_TIMEOUT: "60s"      # Timeout is 60 seconds when in M3U8 mode
+      ACEXY_M3U8: "false"                   # Disable M3U8 mode
+      ACEXY_EMPTY_TIMEOUT: "60s"            # Timeout to close the connection if no data is received
+      ACEXY_BUFFER_SIZE: 4MB                # Buffer size is 4MB
+      ACEXY_NO_RESPONSE_TIMEOUT: "10s"      # Timeout to close the connection if no response is received
+      ACEXY_CLIENT_EVICTION_TIMEOUT: "5s"   # Timeout to evict clients that are not responding
+    links:
+      - acestream
+    depends_on:
+      - acestream
+

@@ -2,7 +2,6 @@ import asyncio
 import logging
 import aiohttp_jinja2
 import jinja2
-import os
 from aiohttp import web
 from aiohttp.web_request import Request
 from aiohttp.web_response import StreamResponse
@@ -13,7 +12,7 @@ from .db import init_db
 from .state import appContext
 from .admin_routes import routes
 
-from .handler import ace_handler, yt_dlp_upd_handler, yt_dlp_handler
+from .handler import yt_dlp_upd_handler, yt_dlp_handler
 
 LISTEN_PORT = 8081
 
@@ -42,14 +41,13 @@ async def prefix_context_processor(request: Request) -> dict[str, Any]:
 async def create_app():
     app = web.Application(middlewares=[prefix_middleware])
     
-    app.router.add_get("/ace/{channel}", ace_handler)
     app.router.add_get("/yt_dlp/{channel}", yt_dlp_handler)
     app.router.add_get("/yt_dlp/{channel}/upd", yt_dlp_upd_handler)    
 
     app.add_routes(routes)
     aiohttp_jinja2.setup(
         app,
-        loader=jinja2.FileSystemLoader('proxy_ace/templates'),
+        loader=jinja2.FileSystemLoader('proxy_ace/forms'),
         context_processors=[prefix_context_processor]
     )
 
@@ -78,8 +76,4 @@ async def main():
     await runner.cleanup()
 
 if __name__ == "__main__":
-    port = os.environ.get('PYTHON_DEBUG_PORT')
-    if port:
-        import debugpy
-        debugpy.listen(("127.0.0.1", int(port)))
     asyncio.run(main())

@@ -1,6 +1,6 @@
 import aiosqlite
 
-DB_PATH = "channels.db"
+DB_PATH = "data/channels.db"
 
 CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS ace_streaming_channels (
