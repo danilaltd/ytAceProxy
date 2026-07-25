@@ -14,7 +14,7 @@ from .admin_routes import routes
 
 from .handler import yt_dlp_upd_handler, yt_dlp_handler
 
-LISTEN_PORT = 8081
+LISTEN_PORT = 80
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -10,6 +10,6 @@ COPY . ./
 
 ENV PYTHONUNBUFFERED=1
 
-EXPOSE 8081
+EXPOSE 80
 
-CMD ["python", "-m", "proxy_ace.proxy_ace"]
+CMD ["python", "-m", "proxy_ace.app"]
