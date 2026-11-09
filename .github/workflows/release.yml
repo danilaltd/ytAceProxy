@@ -1,0 +1,183 @@
+name: Release
+
+on:
+  push:
+    branches: [main, dev]
+    paths-ignore:
+      - README.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/danilaltd/ytaceproxy-proxy
+  ACESTREAM_IMAGE: ghcr.io/martinbjeldbak/acestream-http-proxy:3.5.1
+  ACEXY_IMAGE: ghcr.io/javinator9889/acexy:0.2.2
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    needs: [security-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Select environment
+        id: vars
+        run: |
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+            echo "env=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=dev" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.vars.outputs.env }}-${{ github.run_number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Write digest artifact
+        env:
+          IMAGE_KEY: manager
+          IMAGE_NAME: ${{ env.IMAGE }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p dist
+          printf '%s %s@%s\n' "$IMAGE_KEY" "$IMAGE_NAME" "$IMAGE_DIGEST" > dist/manager.txt
+          cat dist/manager.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-manager
+          path: dist/manager.txt
+          if-no-files-found: error
+
+  companions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - name: Resolve companion digests
+        run: |
+          mkdir -p dist
+          resolve() {
+            key="$1"; ref="$2"
+            digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            printf '%s %s@%s\n' "$key" "${ref%:*}" "$digest" > "dist/$key.txt"
+            cat "dist/$key.txt"
+          }
+          resolve acestream "$ACESTREAM_IMAGE"
+          resolve acexy "$ACEXY_IMAGE"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-companions
+          path: dist/*.txt
+          if-no-files-found: error
+
+  deploy:
+    needs: [build, companions]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: ${{ github.ref_name == 'main' && 'production' || 'development' }}
+    concurrency:
+      group: deploy-ytaceproxy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: dist
+
+      - name: Build digest manifest
+        env:
+          APP: ytaceproxy
+          RELEASE: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}-${{ github.run_number }}
+        run: |
+          python3 - <<'PY'
+          import base64, glob, json, os
+          images = {}
+          for path in glob.glob("dist/*.txt"):
+              key, ref = open(path, encoding="utf-8").read().strip().split(None, 1)
+              images[key] = ref
+          assert set(images) == {"manager", "acestream", "acexy"}, images
+          manifest = {"app": os.environ["APP"], "release": os.environ["RELEASE"], "images": images}
+          raw = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
+          enc = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+          open("manifest.b64", "w", encoding="ascii").write(enc)
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          print("manifest bytes:", len(raw), "base64url chars:", len(enc))
+          PY
+
+      - uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: debian
+
+      - name: Configure SSH host key verification
+        env:
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m700 ~/.ssh
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+            echo "STRICT_HOST_KEY_CHECKING=yes" >> "$GITHUB_ENV"
+          else
+            echo "STRICT_HOST_KEY_CHECKING=accept-new" >> "$GITHUB_ENV"
+            echo "::warning::DEPLOY_KNOWN_HOSTS is not set; using accept-new as bootstrap fallback"
+          fi
+
+      - name: Deploy over forced-command SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || 'debian' }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'deploy' }}
+          APP: ytaceproxy
+          RELEASE: ${{ github.ref_name == 'main' && 'prod' || 'dev' }}-${{ github.run_number }}
+        run: |
+          install -m600 <(printf '%s\n' "$SSH_KEY") ~/.ssh/id_deploy
+          ssh -i ~/.ssh/id_deploy \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o ConnectTimeout=10 \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o StrictHostKeyChecking="$STRICT_HOST_KEY_CHECKING" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "$APP $RELEASE $(cat manifest.b64)"

@@ -1,188 +1,74 @@
 # Proxy ACE
 
-A Python-based media streaming proxy service that handles multiple channel streams and redirects YouTube/streaming URLs to direct playback links.
+An asynchronous `aiohttp` service that resolves streaming URLs with `yt-dlp`
+and redirects clients to the direct playback link. The admin UI manages named
+redirects; a SQLite database stores them.
 
-## Overview
+## What it does
 
-Proxy ACE is an asynchronous HTTP proxy server built with `aiohttp` that:
+- `GET /yt_dlp/{channel}` — 302 redirect to the resolved URL for a channel.
+  If the channel is unknown, it falls back to the `placeholder` redirect when
+  one exists; otherwise it returns 404.
+- `GET /yt_dlp/{channel}/upd` — re-resolves one channel on demand.
+- `GET /admin/redirects` — admin UI: list, add, edit, delete and sync
+  redirects. The UI also exposes a sync action.
+- URL resolution runs in a separate process (`yt-dlp`) with a timeout, so a
+  slow extraction does not block the HTTP server.
 
-1. **Streams IPTV channels** - Provides HTTP streaming access to IPTV channels via `/ace/{channel}` endpoint
-2. **Resolves streaming URLs** - Uses `yt-dlp` to extract direct playable URLs from YouTube and other streaming services
-3. **Manages multiple clients** - Handles concurrent client connections with queue-based buffering
-4. **Hot-reloading configuration** - Watches `channels.json` for changes and syncs automatically
-5. **Reconnection logic** - Implements exponential backoff retry strategy for upstream connection failures
+There is no `channels.json`, no file watcher, no watchdog, and no producer
+loop anymore. The old `/ace/{channel}` streaming endpoint and the old
+`channels.db` are not part of this version.
 
-## Create and activate virtual environment
-
-Create a virtual environment:
+## Run locally
 
 ```bash
 python3 -m venv venv
-```
-
-Activate it:
-
-```bash
 source venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
 pip install -r requirements.txt
+python -m proxy_ace.app
 ```
 
-Check installed packages:
+The app listens on **container/local port 80** (`LISTEN_PORT` in
+`proxy_ace/app.py`). The admin UI is at
+<http://localhost:80/admin/redirects>.
+
+Dependencies are pinned in `requirements.txt` (`aiohttp`, `yt-dlp`,
+`aiosqlite`, `aiohttp-jinja2`, `WTForms`).
+
+## Data
+
+SQLite database: `/app/data/proxies.db` inside the container
+(`proxy_ace/db.py`). The schema is created automatically on startup:
+
+- `ace_streaming_channels`;
+- `redirect_channels` (`name`, `url`, `redirect_url`, `ttl`, `created_at`).
+
+Mount `/app/data` from the host to persist it. Do not copy the old
+`channels.db` into this path; the format is different (JSON → SQLite).
+
+## Docker
+
+Build and run:
 
 ```bash
-pip list
+docker build -t ytaceproxy-proxy .
+docker run --rm \
+  -p 8089:80 \
+  -v "$PWD/data:/app/data" \
+  ytaceproxy-proxy
 ```
 
-## Configuration
+The image is published as
+`ghcr.io/danilaltd/ytaceproxy-proxy` by the release workflow.
 
-### channels.json Format
+## CI/CD
 
-```json
-{
-  "ace": {
-    "channel_name": "stream_id_or_hash"
-  },
-  "yt-dlp": {
-    "channel_name": "https://url.to.stream"
-  }
-}
-```
+`.github/workflows/release.yml` builds the image on a GitHub-hosted runner,
+pushes it to GHCR tagged `<env>-<run_number>`, resolves the pinned companion
+digests (`acestream-http-proxy`, `acexy`), and deploys a digest manifest over
+the forced-command SSH wrapper. `dev` deploys the `dev-*` release, `main`
+deploys `prod-*`. There is no self-hosted runner and no basic auth; the admin
+UI is reachable only over the tailnet in production.
 
-- **ace** section: IPTV channel stream IDs (processed through ACE proxy)
-- **yt-dlp** section: Direct URLs to streaming services (YouTube, X/Twitter, etc.)
-
-## Running the Application
-
-```bash
-python -m proxy_ace.proxy_ace
-```
-
-Server listens on port `8081` (configurable in proxy_ace.py)
-
-## Set up as systemd service
-
-To run this project as a systemd service, create a unit file:
-
-```ini
-sudo nano /etc/systemd/system/proxy-ace.service
-```
-
-Paste the following:
-
-```ini
-[Unit]
-Description=My Python Stream Script
-After=network.target
-
-[Service]
-Type=simple
-GuessMainPID=no
-WorkingDirectory=/path/to/project       
-ExecStart=/path/to/project/venv/bin/python -m proxy_ace.proxy_ace
-Restart=always
-User=daniil
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then enable and start the service:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable proxy-ace
-sudo systemctl start proxy-ace
-```
-
-Check logs:
-
-```bash
-journalctl -u proxy-ace -f
-```
-
-## Architecture
-
-### Core Components
-
-- **proxy_ace.py** - Main application server with signal handling and file watcher for config changes
-- **handler.py** - HTTP request handlers for client streaming and URL redirection
-- **producer.py** - Upstream connection manager that fetches streams and distributes to clients
-- **config.py** - Configuration loader and `yt-dlp` integration for URL extraction
-- **models.py** - Data models for channels, clients, and redirects
-- **channels.json** - Configuration file with channel definitions
-
-### Data Models
-
-- `Channel` - Contains stream URL, connected clients, producer task, and synchronization primitives
-- `RedirectChannel` - Maps original URL to extracted playable URL for streaming services
-- `Client` - Represents a connected client with response stream and data queue
-
-## API Endpoints
-
-### ACE Stream Endpoint
-```
-GET /ace/{channel}
-```
-Returns HLS/MPEG-TS stream for the specified channel. Fails with 404 if channel not found.
-
-### YT-DLP Redirect Endpoint
-```
-GET /yt_dlp/{channel}
-```
-Returns 302 redirect to the direct playable URL extracted by `yt-dlp`. Falls back to placeholder channel if channel not found.
-
-## Dependencies
-
-Key dependencies:
-- `aiohttp` - Async HTTP server and client
-- `yt-dlp` - YouTube and streaming service URL extraction
-- `watchdog` - File system monitoring for config changes
-- `asyncio` - Async/await concurrency
-
-## Features
-
-### Concurrent Client Handling
-- Queue-based buffering (max 25,000 items per client)
-- Auto-drops slow clients when queue fills
-- Proper cleanup on disconnection
-
-### Stream Management
-- Automatic producer task creation per channel
-- Stops producer when no active clients
-- Handles upstream reconnection with exponential backoff
-- Timeout handling with configurable delays
-
-### Configuration Management
-- Automatic config sync on file changes (debounced)
-- Full sync every hour
-- Graceful handling of missing channels
-- Supports adding/removing channels without restart
-
-### Error Handling
-- Comprehensive logging for debugging
-- Automatic client disconnection on errors
-- Producer retry logic (up to 3 attempts with exponential backoff)
-- Signal handling for graceful shutdown (SIGTERM, SIGINT)
-
-## Monitoring
-
-The application logs:
-- Client connections/disconnections
-- Stream status (started, finished, errors)
-- Queue overflow events
-- URL extraction progress
-- Configuration sync events
-
-## Performance Considerations
-
-1. **Queue Management** - Slow clients are dropped to prevent memory buildup
-2. **Process Pooling** - `yt-dlp` runs in separate processes to avoid blocking
-3. **Async I/O** - All network operations are non-blocking
-4. **Resource Cleanup** - Proper cleanup of tasks, processes, and connections
+The Ansible repository owns compose, ports, volumes and the SQLite pre-deploy
+backup. CI only changes image digests.
