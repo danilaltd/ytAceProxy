@@ -22,4 +22,6 @@ Rules:
 - one topic per file, named by subject;
 - a contract change updates the document that states it in the same commit;
 - no secrets, tokens or private keys;
-- when docs and code disagree, the code wins.
+- when docs and code disagree, the code wins;
+- documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) are ignored
+  by the release workflow; changing the workflow itself still triggers it.
