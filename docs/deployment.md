@@ -86,10 +86,9 @@ Details:
   database does not exist yet.
 - `post-deploy.sh` failure rolls back the **image**; the database is not
   restored automatically. Use the pre-deploy backup for that.
-- The workflow's `paths-ignore` lists only `README.md`. A change to
-  `AGENTS.md` or `docs/*.md` therefore triggers a build and a deploy. Either
-  push documentation together with a code change, or extend `paths-ignore` in
-  a separate CI change.
+- The workflow's `paths-ignore` covers `README.md`, `AGENTS.md` and
+  `docs/**`, so documentation-only pushes do not build or deploy. A change to
+  the workflow itself still triggers a release.
 
 ## 4. First bootstrap and manual commands
 

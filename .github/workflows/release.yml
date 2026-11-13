@@ -5,6 +5,8 @@ on:
     branches: [main, dev]
     paths-ignore:
       - README.md
+      - AGENTS.md
+      - docs/**
   workflow_dispatch:
 
 permissions:
