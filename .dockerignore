@@ -9,3 +9,5 @@ venv
 .venv
 test.py
 README.md
+AGENTS.md
+docs

@@ -1,54 +1,81 @@
-# Proxy ACE
+# ytAceProxy
 
-An asynchronous `aiohttp` service that resolves streaming URLs with `yt-dlp`
-and redirects clients to the direct playback link. The admin UI manages named
-redirects; a SQLite database stores them.
+Asynchronous `aiohttp` service that resolves streaming URLs with `yt-dlp` and
+redirects clients to the direct playback URL. Named redirects live in SQLite
+and are managed through a small server-rendered admin UI.
 
-## What it does
+The application is deployed as two independent stacks, `ytaceproxy-prod` and
+`ytaceproxy-dev`. Ansible owns compose, ports, volumes, hooks and backups; CI
+builds the image and changes only image digests.
 
-- `GET /yt_dlp/{channel}` — 302 redirect to the resolved URL for a channel.
-  If the channel is unknown, it falls back to the `placeholder` redirect when
-  one exists; otherwise it returns 404.
-- `GET /yt_dlp/{channel}/upd` — re-resolves one channel on demand.
-- `GET /admin/redirects` — admin UI: list, add, edit, delete and sync
-  redirects. The UI also exposes a sync action.
-- URL resolution runs in a separate process (`yt-dlp`) with a timeout, so a
-  slow extraction does not block the HTTP server.
+- Architecture and request flow: [docs/architecture.md](docs/architecture.md)
+- Deployment, environments and change matrix: [docs/deployment.md](docs/deployment.md)
+- Local development and uv migration: [docs/development.md](docs/development.md)
+- Failures seen in practice: [docs/troubleshooting.md](docs/troubleshooting.md)
+- Planned work (ACE cleanup, acexy redirect, uv): [docs/roadmap.md](docs/roadmap.md)
+- Agent entry point: [AGENTS.md](AGENTS.md)
 
-There is no `channels.json`, no file watcher, no watchdog, and no producer
-loop anymore. The old `/ace/{channel}` streaming endpoint and the old
-`channels.db` are not part of this version.
+## Endpoints
+
+| Method | Path | Behaviour |
+|---|---|---|
+| GET | `/yt_dlp/{channel}` | 302 to the stored `redirect_url`; falls back to the `placeholder` redirect; otherwise 404 |
+| GET | `/yt_dlp/{channel}/upd` | re-resolves one channel now; returns `200 text/plain` |
+| GET | `/admin/redirects` | admin list: add, edit, delete, sync |
+| GET/POST | `/admin/redirects/add` | create a redirect |
+| GET/POST | `/admin/redirects/edit/{id}` | edit a redirect |
+| GET | `/admin/redirects/delete/{id}` | delete a redirect |
+| GET | `/admin/redirects/sync` | re-resolve all redirects in the background |
+
+The old `/ace/{channel}` streaming endpoint does **not** exist in this version.
+The AceStream playback path is the separate `acexy` companion; a convenient
+redirect to acexy is planned, see [docs/roadmap.md](docs/roadmap.md).
+
+## Data
+
+SQLite file: `/app/data/proxies.db` (container path). The schema is created on
+startup from `proxy_ace/db.py`.
+
+`redirect_channels` is the active table:
+
+| Column | Meaning |
+|---|---|
+| `id` | primary key |
+| `name` | unique channel name used in `/yt_dlp/{name}` |
+| `url` | source URL passed to `yt-dlp` |
+| `redirect_url` | resolved URL returned as a 302 |
+| `ttl` | expiry timestamp extracted from the resolved URL; `-1` means eternal |
+| `created_at` | creation timestamp |
+
+`ace_streaming_channels` is a legacy table and is not used by the current
+routes. It will be removed as part of the ACE cleanup.
 
 ## Run locally
 
+Current dependency flow (pip + `requirements.txt`):
+
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python -m proxy_ace.app
 ```
 
-The app listens on **container/local port 80** (`LISTEN_PORT` in
-`proxy_ace/app.py`). The admin UI is at
-<http://localhost:80/admin/redirects>.
+Planned uv flow:
 
-Dependencies are pinned in `requirements.txt` (`aiohttp`, `yt-dlp`,
-`aiosqlite`, `aiohttp-jinja2`, `WTForms`).
+```bash
+uv sync
+uv run python -m proxy_ace.app
+```
 
-## Data
-
-SQLite database: `/app/data/proxies.db` inside the container
-(`proxy_ace/db.py`). The schema is created automatically on startup:
-
-- `ace_streaming_channels`;
-- `redirect_channels` (`name`, `url`, `redirect_url`, `ttl`, `created_at`).
-
-Mount `/app/data` from the host to persist it. Do not copy the old
-`channels.db` into this path; the format is different (JSON → SQLite).
+The app listens on port **80** (`LISTEN_PORT` in `proxy_ace/app.py`). Open
+<http://localhost/admin/redirects>. A local run writes to `/app/data/proxies.db`,
+which normally does not exist on the host; use the Docker command below or
+change `DB_PATH` in a local branch when running outside the container.
 
 ## Docker
 
-Build and run:
+Build the application image:
 
 ```bash
 docker build -t ytaceproxy-proxy .
@@ -58,17 +85,30 @@ docker run --rm \
   ytaceproxy-proxy
 ```
 
-The image is published as
-`ghcr.io/danilaltd/ytaceproxy-proxy` by the release workflow.
+The published image is `ghcr.io/danilaltd/ytaceproxy-proxy`. The root
+`docker-compose.yml` is a **local development stack only** (`manager`,
+`acestream`, `acexy`, host ports 8088/6878/8090). It is not used by CI or by the
+server; the production/dev compose files are generated by Ansible.
 
-## CI/CD
+## Deploy
 
-`.github/workflows/release.yml` builds the image on a GitHub-hosted runner,
-pushes it to GHCR tagged `<env>-<run_number>`, resolves the pinned companion
-digests (`acestream-http-proxy`, `acexy`), and deploys a digest manifest over
-the forced-command SSH wrapper. `dev` deploys the `dev-*` release, `main`
-deploys `prod-*`. There is no self-hosted runner and no basic auth; the admin
-UI is reachable only over the tailnet in production.
+- `dev` push → image built and deployed as `ytaceproxy-dev` (`dev-<run>`).
+- `main` push → image built and deployed as `ytaceproxy-prod` (`prod-<run>`).
+- The workflow builds on GitHub-hosted runners, resolves companion digests,
+  builds a JSON manifest, joins the tailnet and calls the forced-command
+  `deploy-app <app> <release> <base64url>` over SSH.
+- Ansible owns `/srv/ytaceproxy-{prod,dev}/docker-compose.yml`, published
+  ports, data directories, pre/post hooks and backups.
+- Admin UI is tailnet-only; there is no basic auth and no production approval.
 
-The Ansible repository owns compose, ports, volumes and the SQLite pre-deploy
-backup. CI only changes image digests.
+The full flow, command reference and "what to change when" table are in
+[docs/deployment.md](docs/deployment.md).
+
+## Planned changes
+
+1. Remove the remaining ACE-specific artifacts and switch the playback
+   redirect to `acexy`.
+2. Migrate dependency management and the Docker build to `uv`.
+3. Add tests and a small health endpoint.
+
+The concrete checklists are in [docs/roadmap.md](docs/roadmap.md).
