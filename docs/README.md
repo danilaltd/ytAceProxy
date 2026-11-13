@@ -3,7 +3,7 @@
 | Document | Holds |
 |---|---|
 | [../README.md](../README.md) | one-page overview, endpoints, local run, deploy summary |
-| [../AGENTS.md](../AGENTS.md) | project map, invariants, change map, agent rules |
+| [../AGENTS.md](../AGENTS.md) | current snapshot, session start, Git workflow, invariants, change map |
 | [architecture.md](architecture.md) | components, request flow, resolver, data model, deployment topology |
 | [deployment.md](deployment.md) | environments, release flow, what to change where, verification, rollback |
 | [development.md](development.md) | local development, adding routes/schema, uv migration |

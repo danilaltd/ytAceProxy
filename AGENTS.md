@@ -24,6 +24,42 @@ GitHub-hosted runner and deploys immutable digests; it never edits compose.
 Ansible (separate repository `arch2debian`) owns compose, ports, volumes,
 healthchecks, hooks and the SQLite backup.
 
+## Current state (snapshot: 2026-11-14)
+
+- Both stacks are deployed and healthy: `ytaceproxy-prod` release `prod-8`,
+  `ytaceproxy-dev` release `dev-7`.
+- `verify_apps: true`; the last `40_verify` passed.
+- Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
+  release workflow; workflow/code/dependency changes still deploy.
+- Application documentation is complete:
+  `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/deployment.md`,
+  `docs/development.md`, `docs/troubleshooting.md`, `docs/roadmap.md`.
+- Next agreed work is the ACE cleanup, the `/ace` → acexy redirect and the uv
+  migration. Do them as separate changes, dev first.
+
+The release numbers above are a snapshot, not an invariant. Check before
+relying on them:
+
+```bash
+gh run list --repo danilaltd/ytAceProxy --workflow Release --limit 2
+ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-dev/manifest.json"
+ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.json"
+```
+
+## Session start
+
+1. `git status --short --branch` — the tree should be clean; for code changes
+   you should be on `dev`, not `main`.
+2. Read this file, then the document for the area you will touch
+   ([docs/README.md](docs/README.md) is the index).
+3. Check the latest release and manifest (commands above) before assuming a
+   version.
+4. Decide the change type with the “Changing what” table below: application
+   code/CI, server shape (Ansible), or documentation only.
+5. Update the document that states the changed contract **in the same commit**.
+6. Follow the Git workflow below; never commit a code change directly to
+   `main`.
+
 ## Repositories and layers
 
 | Layer | Repository | Responsibility |
@@ -48,6 +84,39 @@ client ──GET /ace/...──────────▶ acexy :80 ──▶ a
 The manager, `acestream` and `acexy` are separate containers in the same
 compose project. The manager does not stream video itself; it only resolves
 links and redirects. The `/ace` redirect into `acexy` is planned, not current.
+
+## Git workflow
+
+Work on `dev`; `main` is the production/release branch.
+
+```bash
+git checkout dev
+git pull --ff-only origin dev
+# edit, test, update docs
+git add -A
+git commit -m "type(scope): summary"
+git push origin dev
+# wait for the dev Release run unless the push is documentation-only
+# verify dev
+git checkout main
+git merge --ff-only dev
+git push origin main
+```
+
+Rules:
+
+- **Never commit a code, dependency, Dockerfile or workflow change directly to
+  `main`.** Push `dev`, wait for the dev deploy, verify it, then fast-forward
+  `main`.
+- Documentation-only changes (`README.md`, `AGENTS.md`, `docs/**`) are skipped
+  by the release workflow. Still keep `dev` and `main` identical: commit on
+  `dev`, then fast-forward `main`.
+- If `main` has diverged (the merge is not a fast-forward), stop and report;
+  do not create a merge commit or force-push.
+- One concern per commit, message `type(scope): summary`. Do not rewrite
+  history or move tags.
+- A failed dev deploy blocks `main`. A failed prod deploy is rolled back by the
+  wrapper; do not “fix” it by pushing another commit blindly.
 
 ## Invariants
 
@@ -145,10 +214,17 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
 ## Documentation rules
 
 - Keep the README to one page; put details in `docs/<subject>.md`.
+- New documentation goes to an existing subject file when possible. If a new
+  topic appears, create `docs/<topic>.md` and add it to
+  [docs/README.md](docs/README.md); do not create another top-level `.md`.
+- `AGENTS.md` holds the session map, invariants, Git workflow and current
+  snapshot — not feature tutorials.
 - Record invariants, ordering constraints and “do not touch” rules; skip code
   walkthroughs that can be read in a minute.
-- A contract change (endpoint, env var, table, manifest key, port) updates the
-  document that states it in the same commit.
+- A contract change (endpoint, env var, table, manifest key, port, CI
+  behaviour) updates the document that states it in the same commit.
+- Planned work goes to [docs/roadmap.md](docs/roadmap.md); completed work
+  removes the stale roadmap item.
 - Do not put secrets, real tokens, hostnames or host paths in docs.
 - When code and docs disagree, the code wins: fix or delete the stale text.
 

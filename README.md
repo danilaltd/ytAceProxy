@@ -15,6 +15,14 @@ builds the image and changes only image digests.
 - Planned work (ACE cleanup, acexy redirect, uv): [docs/roadmap.md](docs/roadmap.md)
 - Agent entry point: [AGENTS.md](AGENTS.md)
 
+## Current state
+
+Snapshot (2026-11-14): `ytaceproxy-prod` release `prod-8` and
+`ytaceproxy-dev` release `dev-7` are deployed and healthy; the last
+`40_verify` passed. Release numbers are a snapshot, not an invariant — check
+`/var/lib/deploy/<app>/manifest.json` or the latest `Release` run. Session
+start, Git rules and live-state commands are in [AGENTS.md](AGENTS.md).
+
 ## Endpoints
 
 | Method | Path | Behaviour |
