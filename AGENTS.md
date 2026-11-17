@@ -26,19 +26,21 @@ healthchecks, hooks and the SQLite backup.
 
 ## Current state (snapshot: 2026-11-17)
 
-- Both stacks are deployed and healthy: `ytaceproxy-prod` release `prod-8`,
-  `ytaceproxy-dev` release `dev-7` at the start of this change.
+- Both stacks are healthy: `ytaceproxy-prod` release `prod-8` and
+  `ytaceproxy-dev` release `dev-9`.
+- `dev` has the uv migration, ACE cleanup and the `/ace` → acexy redirect with
+  tests. The dev database no longer has `ace_streaming_channels`; the pre-clean
+  backup is in `/var/backups/ytaceproxy/dev/`.
+- `prod` still runs the pre-change image and has no `ACEXY_BASE_URL`; the
+  change is not merged to `main`.
 - `verify_apps: true`; the last `40_verify` passed.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
 - Application documentation is complete:
   `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/deployment.md`,
   `docs/development.md`, `docs/troubleshooting.md`, `docs/roadmap.md`.
-- Done on `dev`: uv migration, ACE cleanup and the `/ace` → acexy redirect
-  with tests. They are separate commits; `main` is not moved until the dev
-  verification passes.
-- Next agreed work: tests/health follow-ups and the optional removal of the
-  host-published `acestream` ports.
+- Next agreed work: verify dev, roll out to prod, then add a health endpoint
+  and remove the host-published `acestream` ports after clients migrate.
 
 The release numbers above are a snapshot, not an invariant. Check before
 relying on them:

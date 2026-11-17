@@ -9,19 +9,22 @@ Done on `dev`:
 - removed the legacy ACE table/stub and the `ACE Channels` admin title;
 - added `/ace/{name}` → `acexy` redirects with a separate `ace_channels`
   table and admin page;
-- added `pytest` tests for URL construction, 404/503 and the fresh schema.
+- added `pytest` tests for URL construction, 404/503 and the fresh schema;
+- dropped the empty `ace_streaming_channels` table on the dev database after a
+  pre-deploy backup. Prod still has the empty table until its rollout.
 
 Remaining work:
 
-## 1. Optional cleanup of the legacy table
+## 1. Cleanup of the legacy table on prod
 
-New databases no longer create `ace_streaming_channels`. Existing dev/prod
-databases may still contain the empty orphan. Drop it only after a backup, one
-environment at a time, and record the result in the deployment log.
+New databases no longer create `ace_streaming_channels`. Dev was cleaned after
+a pre-deploy backup; the prod database still contains the empty orphan. Drop it
+only after the prod rollout and a backup, and record the result in the
+deployment log.
 
 ```bash
-ssh asus@debian "sudo /srv/ytaceproxy-dev/pre-deploy.sh pre-ace-cleanup"
-ssh asus@debian "sudo docker exec -i ytaceproxy-dev-manager-1 python - <<'PY'
+ssh asus@debian "sudo /srv/ytaceproxy-prod/pre-deploy.sh pre-ace-cleanup"
+ssh asus@debian "sudo docker exec -i ytaceproxy-prod-manager-1 python - <<'PY'
 import sqlite3
 c = sqlite3.connect('/app/data/proxies.db')
 c.execute('DROP TABLE IF EXISTS ace_streaming_channels')
@@ -30,9 +33,8 @@ c.close()
 PY"
 ```
 
-Repeat for `ytaceproxy-prod` after the dev check. Verify with
-`SELECT name FROM sqlite_master WHERE type='table'`; an image rollback to the
-old code may recreate the empty table, which is harmless.
+Verify with `SELECT name FROM sqlite_master WHERE type='table'`; an image
+rollback to the old code may recreate the empty table, which is harmless.
 
 ## 2. Remove the host-published acestream ports
 

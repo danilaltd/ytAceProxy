@@ -18,10 +18,11 @@ builds the image and changes only image digests.
 
 ## Current state
 
-Snapshot (2026-11-17): the ACE cleanup, the `/ace` → acexy redirect and the uv
-migration are implemented on `dev`. Release numbers are a snapshot, not an
-invariant — check `/var/lib/deploy/<app>/manifest.json` or the latest `Release`
-run. Session start, Git rules and live-state commands are in
+Snapshot (2026-11-17): `ytaceproxy-dev` release `dev-9` has the uv migration,
+the ACE cleanup and the `/ace` → acexy redirect. `ytaceproxy-prod` remains on
+`prod-8` and the change is not merged to `main`. Release numbers are a
+snapshot, not an invariant — check `/var/lib/deploy/<app>/manifest.json` or the
+latest `Release` run. Session start, Git rules and live-state commands are in
 [AGENTS.md](AGENTS.md).
 
 ## Endpoints
