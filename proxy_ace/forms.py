@@ -12,8 +12,8 @@ class AceChannelForm(Form):
         validators.DataRequired(),
         validators.Length(min=1, max=100),
         validators.Regexp(
-            r'^[^/]+$',
-            message='Name must not contain "/"',
+            r'^[^/?#]+$',
+            message='Name must not contain "/", "?" or "#"',
         ),
     ])
     content_id = StringField('Content ID', [

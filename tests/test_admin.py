@@ -73,6 +73,19 @@ async def test_ace_admin_edits_and_deletes_channel(aiohttp_client, app):
     assert await repo.get_ace_channels() == []
 
 
+async def test_ace_admin_rejects_url_separators_in_name(aiohttp_client, app):
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        "/admin/ace/add",
+        data={"name": "bad/name", "content_id": CONTENT_ID},
+        allow_redirects=False,
+    )
+
+    assert response.status == 200
+    assert 'must not contain' in await response.text()
+
+
 async def test_ace_admin_rejects_bad_content_id(aiohttp_client, app):
     client = await aiohttp_client(app)
 
