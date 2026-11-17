@@ -3,11 +3,13 @@
 .gitignore
 .dockerignore
 __pycache__
+.pytest_cache
 *.pyc
 *.db
 venv
 .venv
 test.py
+tests
 README.md
 AGENTS.md
 docs

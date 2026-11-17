@@ -1,0 +1,27 @@
+[project]
+name = "ytaceproxy"
+version = "0.0.0"
+description = "aiohttp redirect manager for yt-dlp and acexy playback"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp==3.13.3",
+    "aiohttp-jinja2==1.6",
+    "aiosqlite==0.22.1",
+    "WTForms==3.2.1",
+    "yt-dlp==2026.3.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-aiohttp>=1.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
