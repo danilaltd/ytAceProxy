@@ -33,6 +33,10 @@ healthchecks, hooks and the SQLite backup.
   backup is in `/var/backups/ytaceproxy/dev/`.
 - `prod` still runs the pre-change image and has no `ACEXY_BASE_URL`; the
   change is not merged to `main`.
+- The Ansible ACE changes are on the local `arch2debian` `dev` branch and were
+  applied to the dev stack only. Do not run `30_services` from `main` until
+  that branch is merged: it would remove `ACEXY_BASE_URL` from the dev compose
+  and restore the legacy post-deploy table requirement.
 - `verify_apps: true`; the last `40_verify` passed.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
