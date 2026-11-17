@@ -128,14 +128,6 @@ async def parallel_fill_redirects(
             logger.info(f"Link for {name} ({url}): {url_redirect}")
     return redirects
 
-async def load_channels():
-    # return await get_channels()
-
-    return {
-        "ace": {""},
-        "yt-dlp": {""},
-    }
-
 async def sync_channels():
     # appContext: AppContext
     logger.info(f"start sync")
