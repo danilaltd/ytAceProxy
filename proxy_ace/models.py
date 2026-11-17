@@ -11,3 +11,11 @@ class RedirectChannel:
     created_at: Optional[float] = time.time()
     id: Optional[int] = None
     dirty: Optional[bool] = False
+
+
+@dataclass
+class AceChannel:
+    name: str
+    content_id: str
+    created_at: Optional[float] = time.time()
+    id: Optional[int] = None

@@ -1,7 +1,8 @@
 import logging
 from aiohttp import web
 
-from .repo import get_redirect_url
+from .ace import build_acexy_stream_url, get_acexy_base_url
+from .repo import get_ace_content_id, get_redirect_url
 from .config import update_special_channel
 from .state import AppContext, appContext
 
@@ -50,3 +51,19 @@ async def handle_yt_dlp_upd(request: web.Request, appContext: AppContext):
         content_type="text/plain",
         status=200
     )
+
+
+async def ace_handler(request: web.Request):
+    channel_name = request.match_info["channel"]
+
+    content_id = await get_ace_content_id(channel_name)
+    if not content_id:
+        return web.Response(status=404, text="Unknown ACE channel")
+
+    try:
+        redirect_url = build_acexy_stream_url(get_acexy_base_url(), content_id)
+    except ValueError as exc:
+        logger.error("ACE redirect is unavailable: %s", exc)
+        return web.Response(status=503, text="ACE playback is not configured")
+
+    return redirect_response(redirect_url)

@@ -1,6 +1,6 @@
 import aiosqlite
 
-from .models import RedirectChannel
+from .models import AceChannel, RedirectChannel
 from .db import DB_PATH
 
 async def get_redirects() -> list[RedirectChannel]:
@@ -55,6 +55,65 @@ async def delete_redirect(id_: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM redirect_channels WHERE id=?", (id_,))
         await db.commit()
+
+async def get_ace_channels() -> list[AceChannel]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, name, content_id, created_at FROM ace_channels"
+        ) as cursor:
+            return [
+                AceChannel(**dict(row))
+                async for row in cursor
+            ]
+
+
+async def get_ace_channel_by_id(id_: int) -> AceChannel | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT id, name, content_id, created_at FROM ace_channels WHERE id = ?",
+            (id_,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return AceChannel(**dict(row)) if row else None
+
+
+async def get_ace_content_id(name: str) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT content_id FROM ace_channels WHERE name = (?)",
+            (name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def add_ace_channel(name: str, content_id: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO ace_channels (name, content_id) VALUES (?, ?)",
+            (name, content_id),
+        )
+        await db.commit()
+
+
+async def update_ace_channel(channel: AceChannel):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """UPDATE ace_channels
+               SET name = ?, content_id = ?
+               WHERE id = ?""",
+            (channel.name, channel.content_id, channel.id)
+        )
+        await db.commit()
+
+
+async def delete_ace_channel(id_: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM ace_channels WHERE id=?", (id_,))
+        await db.commit()
+
 
 async def update_redirects(redirects: list[RedirectChannel]):
     # db = await get_db()

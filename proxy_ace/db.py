@@ -11,6 +11,13 @@ CREATE TABLE IF NOT EXISTS redirect_channels (
     ttl INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS ace_channels (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    content_id TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 async def init_db():

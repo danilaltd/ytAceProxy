@@ -1,5 +1,8 @@
 <h1>yt-dlp redirects</h1>
-<a href="{{ app_prefix }}{{ url_for('redirect_add') }}">Add New</a>
+<p>
+    <a href="{{ app_prefix }}{{ url_for('redirect_add') }}">Add New</a> |
+    <a href="{{ app_prefix }}{{ url_for('ace_list') }}">ACE channels</a>
+</p>
 <table border="1">
     <tr><th>ID</th><th>Name</th><th>URL</th><th>Redirect</th><th>ttl</th><th>created_at</th><th>Actions</th></tr>
     {% for ch in redirects %}

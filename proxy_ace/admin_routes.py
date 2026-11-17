@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 from typing import Any, Dict
 
 import aiohttp_jinja2
@@ -6,17 +7,32 @@ from aiohttp import web
 
 from .config import sync_channels
 
-from .models import RedirectChannel
-from .forms import RedirectForm
+from .models import AceChannel, RedirectChannel
+from .forms import AceChannelForm, RedirectForm
 from .repo import (
-    add_redirect, 
+    add_ace_channel,
+    add_redirect,
+    delete_ace_channel,
     delete_redirect,
+    get_ace_channel_by_id,
+    get_ace_channels,
     get_redirect_by_id,
-    get_redirects, 
-    update_redirect
+    get_redirects,
+    update_ace_channel,
+    update_redirect,
 )
 
 routes = web.RouteTableDef()
+
+
+def _redirect(request: web.Request, path: str) -> web.HTTPFound:
+    return web.HTTPFound(request.get("app_prefix", "") + path)
+
+
+def _normalize_ace_form(form: AceChannelForm) -> None:
+    form.name.data = (form.name.data or "").strip()
+    form.content_id.data = (form.content_id.data or "").strip().lower()
+
 
 @routes.get("/admin/redirects")
 @aiohttp_jinja2.template("redirects.html")
@@ -87,3 +103,78 @@ async def delete_redirect_handler(request: web.Request):
 async def sync_redirects_handler(request: web.Request):
     asyncio.create_task(sync_channels())
     raise web.HTTPFound("/admin/redirects")
+
+
+@routes.get("/admin/ace", name="ace_list")
+@aiohttp_jinja2.template("ace_channels.html")
+async def ace_channels_page(request: web.Request):
+    channels = await get_ace_channels()
+    return {"channels": channels}
+
+
+@routes.get("/admin/ace/add", name="ace_add")
+@aiohttp_jinja2.template("ace_form.html")
+async def add_ace_form_page(request: web.Request) -> Dict[str, Any]:
+    return {"form": AceChannelForm(), "title": "Add ACE channel"}
+
+
+@routes.post("/admin/ace/add")
+async def add_ace_handler(request: web.Request):
+    form = AceChannelForm(await request.post())
+    _normalize_ace_form(form)
+
+    if form.validate():
+        try:
+            await add_ace_channel(form.name.data, form.content_id.data)
+        except sqlite3.IntegrityError:
+            form.name.errors.append("A channel with this name already exists")
+        else:
+            raise _redirect(request, "/admin/ace")
+
+    return aiohttp_jinja2.render_template(
+        "ace_form.html", request, {"form": form, "title": "Add ACE channel"}
+    )
+
+
+@routes.get("/admin/ace/edit/{id}", name="ace_edit")
+@aiohttp_jinja2.template("ace_form.html")
+async def edit_ace_page(request: web.Request) -> Dict[str, Any]:
+    channel = await get_ace_channel_by_id(int(request.match_info["id"]))
+    if channel is None:
+        raise web.HTTPNotFound()
+
+    form = AceChannelForm(data={"name": channel.name, "content_id": channel.content_id})
+    return {"form": form, "title": "Edit ACE channel"}
+
+
+@routes.post("/admin/ace/edit/{id}")
+async def edit_ace_handler(request: web.Request):
+    ch_id = int(request.match_info["id"])
+    if await get_ace_channel_by_id(ch_id) is None:
+        raise web.HTTPNotFound()
+
+    form = AceChannelForm(await request.post())
+    _normalize_ace_form(form)
+
+    if form.validate():
+        channel = AceChannel(
+            id=ch_id,
+            name=form.name.data,
+            content_id=form.content_id.data,
+        )
+        try:
+            await update_ace_channel(channel)
+        except sqlite3.IntegrityError:
+            form.name.errors.append("A channel with this name already exists")
+        else:
+            raise _redirect(request, "/admin/ace")
+
+    return aiohttp_jinja2.render_template(
+        "ace_form.html", request, {"form": form, "title": "Edit ACE channel"}
+    )
+
+
+@routes.get("/admin/ace/delete/{id}", name="ace_del")
+async def delete_ace_handler(request: web.Request):
+    await delete_ace_channel(int(request.match_info["id"]))
+    raise _redirect(request, "/admin/ace")

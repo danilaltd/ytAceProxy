@@ -12,7 +12,7 @@ from .db import init_db
 from .state import appContext
 from .admin_routes import routes
 
-from .handler import yt_dlp_upd_handler, yt_dlp_handler
+from .handler import ace_handler, yt_dlp_upd_handler, yt_dlp_handler
 
 LISTEN_PORT = 80
 
@@ -42,7 +42,8 @@ async def create_app():
     app = web.Application(middlewares=[prefix_middleware])
     
     app.router.add_get("/yt_dlp/{channel}", yt_dlp_handler)
-    app.router.add_get("/yt_dlp/{channel}/upd", yt_dlp_upd_handler)    
+    app.router.add_get("/yt_dlp/{channel}/upd", yt_dlp_upd_handler)
+    app.router.add_get("/ace/{channel}", ace_handler)
 
     app.add_routes(routes)
     aiohttp_jinja2.setup(

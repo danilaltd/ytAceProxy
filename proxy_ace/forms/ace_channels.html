@@ -1,0 +1,20 @@
+<h1>ACE channels (acexy)</h1>
+<p>
+    <a href="{{ app_prefix }}{{ url_for('ace_add') }}">Add New</a> |
+    <a href="{{ app_prefix }}/admin/redirects">yt-dlp redirects</a>
+</p>
+<table border="1">
+    <tr><th>ID</th><th>Name</th><th>Content ID</th><th>Created</th><th>Actions</th></tr>
+    {% for ch in channels %}
+    <tr>
+        <td>{{ ch.id }}</td>
+        <td>{{ ch.name }}</td>
+        <td>{{ ch.content_id }}</td>
+        <td>{{ ch.created_at }}</td>
+        <td>
+            <a href="{{ app_prefix }}{{ url_for('ace_edit', id=ch.id) }}">Edit</a>
+            <a href="{{ app_prefix }}{{ url_for('ace_del', id=ch.id) }}" onclick="return confirm('Delete?')">Delete</a>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
