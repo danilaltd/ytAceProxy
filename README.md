@@ -1,8 +1,9 @@
 # ytAceProxy
 
 Asynchronous `aiohttp` service that resolves streaming URLs with `yt-dlp` and
-redirects clients to the direct playback URL. Named redirects live in SQLite
-and are managed through a small server-rendered admin UI.
+redirects clients to the direct playback URL. It also maps named ACE channels to
+the per-environment `acexy` stream endpoint. Named redirects and ACE channels
+live in SQLite and are managed through a small server-rendered admin UI.
 
 The application is deployed as two independent stacks, `ytaceproxy-prod` and
 `ytaceproxy-dev`. Ansible owns compose, ports, volumes, hooks and backups; CI
@@ -10,18 +11,18 @@ builds the image and changes only image digests.
 
 - Architecture and request flow: [docs/architecture.md](docs/architecture.md)
 - Deployment, environments and change matrix: [docs/deployment.md](docs/deployment.md)
-- Local development and uv migration: [docs/development.md](docs/development.md)
+- Local development, tests and uv: [docs/development.md](docs/development.md)
 - Failures seen in practice: [docs/troubleshooting.md](docs/troubleshooting.md)
-- Planned work (ACE cleanup, acexy redirect, uv): [docs/roadmap.md](docs/roadmap.md)
+- Planned work (tests, health, optional acestream exposure): [docs/roadmap.md](docs/roadmap.md)
 - Agent entry point: [AGENTS.md](AGENTS.md)
 
 ## Current state
 
-Snapshot (2026-11-14): `ytaceproxy-prod` release `prod-8` and
-`ytaceproxy-dev` release `dev-7` are deployed and healthy; the last
-`40_verify` passed. Release numbers are a snapshot, not an invariant — check
-`/var/lib/deploy/<app>/manifest.json` or the latest `Release` run. Session
-start, Git rules and live-state commands are in [AGENTS.md](AGENTS.md).
+Snapshot (2026-11-17): the ACE cleanup, the `/ace` → acexy redirect and the uv
+migration are implemented on `dev`. Release numbers are a snapshot, not an
+invariant — check `/var/lib/deploy/<app>/manifest.json` or the latest `Release`
+run. Session start, Git rules and live-state commands are in
+[AGENTS.md](AGENTS.md).
 
 ## Endpoints
 
@@ -29,22 +30,28 @@ start, Git rules and live-state commands are in [AGENTS.md](AGENTS.md).
 |---|---|---|
 | GET | `/yt_dlp/{channel}` | 302 to the stored `redirect_url`; falls back to the `placeholder` redirect; otherwise 404 |
 | GET | `/yt_dlp/{channel}/upd` | re-resolves one channel now; returns `200 text/plain` |
-| GET | `/admin/redirects` | admin list: add, edit, delete, sync |
+| GET | `/ace/{channel}` | 302 to `<ACEXY_BASE_URL>/ace/getstream?id=<content_id>`; unknown channel is 404; missing `ACEXY_BASE_URL` is 503 |
+| GET | `/admin/redirects` | admin list of yt-dlp redirects: add, edit, delete, sync |
 | GET/POST | `/admin/redirects/add` | create a redirect |
 | GET/POST | `/admin/redirects/edit/{id}` | edit a redirect |
 | GET | `/admin/redirects/delete/{id}` | delete a redirect |
 | GET | `/admin/redirects/sync` | re-resolve all redirects in the background |
+| GET | `/admin/ace` | admin list of ACE channels: add, edit, delete |
+| GET/POST | `/admin/ace/add` | create an ACE channel |
+| GET/POST | `/admin/ace/edit/{id}` | edit an ACE channel |
+| GET | `/admin/ace/delete/{id}` | delete an ACE channel |
 
-The old `/ace/{channel}` streaming endpoint does **not** exist in this version.
-The AceStream playback path is the separate `acexy` companion; a convenient
-redirect to acexy is planned, see [docs/roadmap.md](docs/roadmap.md).
+`/ace` names are independent from `/yt_dlp` names: the same name can have a
+yt-dlp redirect and an ACE content id. The manager never proxies video; it
+returns a 302 and the media connection is between the client and
+`acexy`/`acestream`.
 
 ## Data
 
 SQLite file: `/app/data/proxies.db` (container path). The schema is created on
 startup from `proxy_ace/db.py`.
 
-`redirect_channels` is the active table:
+`redirect_channels` is the yt-dlp table:
 
 | Column | Meaning |
 |---|---|
@@ -55,40 +62,52 @@ startup from `proxy_ace/db.py`.
 | `ttl` | expiry timestamp extracted from the resolved URL; `-1` means eternal |
 | `created_at` | creation timestamp |
 
-`ace_streaming_channels` is a legacy table and is not used by the current
-routes. It will be removed as part of the ACE cleanup.
+`ace_channels` is the ACE table:
+
+| Column | Meaning |
+|---|---|
+| `id` | primary key |
+| `name` | unique channel name used in `/ace/{name}` |
+| `content_id` | 40-character AceStream content id/hash |
+| `created_at` | creation timestamp |
+
+A fresh database contains only these two tables. The old
+`ace_streaming_channels` table is no longer created; existing databases may
+keep an empty orphan until the optional cleanup in
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Run locally
 
-Current dependency flow (pip + `requirements.txt`):
+Dependency management is `uv` (`pyproject.toml` + `uv.lock`):
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m proxy_ace.app
+uv sync --frozen
+ACEXY_BASE_URL=http://localhost:8090 uv run python -m proxy_ace.app
+uv run pytest
 ```
 
-Planned uv flow:
+The app listens on port **80** (`LISTEN_PORT` in `proxy_ace/app.py`), so either
+run with the needed privileges or temporarily change `LISTEN_PORT` on a local
+branch. Open <http://localhost/admin/redirects> or
+<http://localhost/admin/ace>.
 
-```bash
-uv sync
-uv run python -m proxy_ace.app
-```
+The database path is the container path `/app/data/proxies.db`. For a
+non-Docker run, mount or create that directory, or change `DB_PATH` in a local
+patch. Do not commit a local path change.
 
-The app listens on port **80** (`LISTEN_PORT` in `proxy_ace/app.py`). Open
-<http://localhost/admin/redirects>. A local run writes to `/app/data/proxies.db`,
-which normally does not exist on the host; use the Docker command below or
-change `DB_PATH` in a local branch when running outside the container.
+The local stack in `docker-compose.yml` sets `ACEXY_BASE_URL` to
+`http://localhost:8090` by default; override `ACEXY_BASE_URL` when the browser
+is not on the Docker host.
 
 ## Docker
 
-Build the application image:
+Build and run the application image:
 
 ```bash
 docker build -t ytaceproxy-proxy .
 docker run --rm \
   -p 8089:80 \
+  -e ACEXY_BASE_URL=http://localhost:8090 \
   -v "$PWD/data:/app/data" \
   ytaceproxy-proxy
 ```
@@ -106,7 +125,8 @@ server; the production/dev compose files are generated by Ansible.
   builds a JSON manifest, joins the tailnet and calls the forced-command
   `deploy-app <app> <release> <base64url>` over SSH.
 - Ansible owns `/srv/ytaceproxy-{prod,dev}/docker-compose.yml`, published
-  ports, data directories, pre/post hooks and backups.
+  ports, data directories, pre/post hooks and backups. It also renders
+  `ACEXY_BASE_URL` for the manager.
 - Admin UI is tailnet-only; there is no basic auth and no production approval.
 
 The full flow, command reference and "what to change when" table are in
@@ -114,9 +134,9 @@ The full flow, command reference and "what to change when" table are in
 
 ## Planned changes
 
-1. Remove the remaining ACE-specific artifacts and switch the playback
-   redirect to `acexy`.
-2. Migrate dependency management and the Docker build to `uv`.
-3. Add tests and a small health endpoint.
+1. Add a small `/health` endpoint and structured logging improvements.
+2. Remove the host-published `acestream` ports after all clients use `/ace`
+   through `acexy`.
+3. Revisit memory limits after a week of `docker stats` data.
 
 The concrete checklists are in [docs/roadmap.md](docs/roadmap.md).

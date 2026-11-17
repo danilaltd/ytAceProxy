@@ -40,6 +40,7 @@ Ansible**. Do not edit them on the host; change the role and run `30_services`.
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
 | acestream | `6878` | `6879` |
 | acexy | `8090` | `8091` |
+| `ACEXY_BASE_URL` | `http://<tailnet-ip>:8090` | `http://<tailnet-ip>:8091` |
 | backup | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 | manifest/log | `/var/lib/deploy/<app>`, `/var/log/deploy/<app>.log` | same pattern |
 
@@ -134,8 +135,9 @@ ssh asus@debian "sudo ls -l /var/backups/ytaceproxy/<env>/"
 | resolver format/timeout/concurrency | `proxy_ace/config.py` | push `dev`; check `/yt_dlp/.../upd` |
 | admin UI fields or templates | `proxy_ace/admin_routes.py`, `proxy_ace/forms/*.html` | push `dev`; verify UI |
 | DB queries | `proxy_ace/repo.py` | push `dev`; check post-deploy log |
-| dependencies | `requirements.txt` (now) / `pyproject.toml` + `uv.lock` (after uv) | rebuild image |
+| dependencies | `pyproject.toml` + `uv.lock` | `uv lock`, rebuild image |
 | base image, port, entry point | `Dockerfile` | keep port 80 and `/app/data`; push `dev` |
+| ACE redirect / URL builder | `proxy_ace/ace.py`, `proxy_ace/handler.py` | set `ACEXY_BASE_URL`; test on `dev` |
 
 No Ansible change is needed for normal application code: the image digest is
 the only server-side change.
@@ -147,7 +149,8 @@ there is no migration framework.
 
 | Change | Edit | Extra |
 |---|---|---|
-| add a column/table | `proxy_ace/db.py`, `proxy_ace/repo.py` | new DBs get it automatically; old DBs need a manual migration |
+| add a table | `proxy_ace/db.py`, `proxy_ace/repo.py` | created automatically on startup, including existing DBs |
+| add a column | `proxy_ace/db.py`, `proxy_ace/repo.py` | existing DBs need a manual migration |
 | required table for post-deploy | `arch2debian/roles/ytaceproxy/templates/post-deploy.sh.j2` | run `30_services` |
 | remove legacy `ace_streaming_channels` | `db.py`, post-deploy template, docs | take a backup first; see [roadmap.md](roadmap.md) |
 
@@ -155,12 +158,17 @@ Before any schema-changing deploy, run the pre-deploy hook or let the wrapper
 run it. If the new image cannot read the old schema, restore
 `/var/backups/ytaceproxy/<env>/pre-*.db` while the manager is stopped.
 
+`ace_channels` is additive. Add it to the post-deploy required set only after
+both environments have run an image that creates it; until then the app
+healthcheck and `redirect_channels` check are enough.
+
 ### 5.3 Compose, ports, volumes
 
 | Change | Edit | Then |
 |---|---|---|
 | published port or bind address | `arch2debian/inventory/group_vars/debian_servers/exposure.yml` (`ytace_<env>_*`) | `30_services`, `40_verify` |
 | service, volume, healthcheck, logging | `arch2debian/roles/ytaceproxy/templates/docker-compose.yml.j2` | `30_services`, `40_verify` |
+| manager `ACEXY_BASE_URL` | `arch2debian/roles/ytaceproxy/templates/docker-compose.yml.j2` | `30_services`; must be client-reachable, not Docker DNS |
 | data/cache directory layout | `roles/ytaceproxy/tasks/environment.yml`, defaults | `30_services` |
 | pre/post hook behaviour | `roles/ytaceproxy/templates/*.j2` | `30_services` |
 | environment-specific ports | `inventory/group_vars/debian_servers/main.yml` (`ytaceproxy_environments`) + `exposure.yml` | `30_services`, `40_verify` |
@@ -249,8 +257,11 @@ ssh asus@debian "sudo docker inspect -f '{{.Config.Image}}' $APP-manager-1"
 
 # 4. UI and a test redirect
 curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/redirects
+curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/ace
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
   http://<tailnet-ip>:<manager-port>/yt_dlp/<channel>
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  http://<tailnet-ip>:<manager-port>/ace/<channel>
 
 # 5. backup
 ssh asus@debian "sudo ls -lt /var/backups/ytaceproxy/$ENV/ | head"
@@ -265,8 +276,9 @@ ssh asus@debian "sudo grep MANAGER_IMAGE_REF /srv/$APP/deploy-images.env"
 ```
 
 The acceptance criteria are: manifest has exactly `manager`, `acestream`,
-`acexy`; manager is healthy; UI answers; a known redirect is 302; a
-pre-deploy backup exists; re-running `30_services` keeps the digest.
+`acexy`; manager is healthy; both admin pages answer; a known `/yt_dlp`
+redirect is 302; a known `/ace` channel is 302 to the environment's acexy port;
+a pre-deploy backup exists; re-running `30_services` keeps the digest.
 
 ## 7. Rollback
 
@@ -297,12 +309,16 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml sta
 ```
 
 There are no migrations, so an image rollback does not roll back the schema;
-the pre-deploy backup is the restore point.
+the pre-deploy backup is the restore point. `ace_channels` is additive and can
+stay in place during a rollback. The old image may recreate the empty
+`ace_streaming_channels` table; that is harmless and can be dropped again.
 
 ## 8. Known operational notes
 
 - `30_services` never starts `rwwatcher`; ytAceProxy is started by the role.
 - The manager healthcheck is a TCP connect to port 80 inside the container.
+- `ACEXY_BASE_URL` is rendered from the tailnet IP and the per-environment
+  acexy port. Re-run `30_services` after a Tailscale address or port change.
 - Logs are capped per container (`json-file`, 10 MB × 3).
 - Memory limits are intentionally not set; measured usage is far below the
   host limit.

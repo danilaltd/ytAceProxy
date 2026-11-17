@@ -6,9 +6,9 @@
 | [../AGENTS.md](../AGENTS.md) | current snapshot, session start, Git workflow, invariants, change map |
 | [architecture.md](architecture.md) | components, request flow, resolver, data model, deployment topology |
 | [deployment.md](deployment.md) | environments, release flow, what to change where, verification, rollback |
-| [development.md](development.md) | local development, adding routes/schema, uv migration |
+| [development.md](development.md) | local development, adding routes/schema, tests, uv |
 | [troubleshooting.md](troubleshooting.md) | real failures and the commands that diagnose them |
-| [roadmap.md](roadmap.md) | ACE cleanup, acexy redirect, uv migration |
+| [roadmap.md](roadmap.md) | legacy-table cleanup, health/logging, acestream exposure |
 
 Server-side documentation lives in the Ansible repository:
 

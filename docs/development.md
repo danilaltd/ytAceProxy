@@ -5,29 +5,31 @@
 | Path | Purpose |
 |---|---|
 | `proxy_ace/app.py` | `aiohttp` application, routes, startup/shutdown |
-| `proxy_ace/handler.py` | `/yt_dlp` handlers and redirect response |
+| `proxy_ace/handler.py` | `/yt_dlp`, `/ace` handlers and redirect response |
 | `proxy_ace/admin_routes.py` | admin list/add/edit/delete/sync routes |
 | `proxy_ace/config.py` | `yt-dlp` resolution, sync logic, TTL parsing |
+| `proxy_ace/ace.py` | acexy URL construction from `ACEXY_BASE_URL` |
 | `proxy_ace/db.py` | SQLite path and schema creation |
-| `proxy_ace/repo.py` | SQL queries for redirects |
-| `proxy_ace/models.py` | `RedirectChannel` dataclass |
+| `proxy_ace/repo.py` | SQL queries for redirects and ACE channels |
+| `proxy_ace/models.py` | `RedirectChannel` and `AceChannel` dataclasses |
 | `proxy_ace/state.py` | process-wide stop event |
 | `proxy_ace/forms/` | WTForms and Jinja2 templates |
-| `Dockerfile` | image build |
+| `tests/` | pytest unit and handler tests |
+| `pyproject.toml`, `uv.lock` | dependencies and lock file |
+| `Dockerfile` | image build with `uv sync --frozen` |
 | `.github/workflows/release.yml` | build and digest deploy |
 
-There is no `channels.json`, no watcher and no producer loop. The old
-`/ace/{channel}` streaming endpoint is gone.
+There is no `channels.json` and no watcher. The old `/ace/{channel}` streaming
+endpoint is gone; `/ace/{name}` is now a redirect into `acexy`.
 
 ## Run locally
 
-Current flow (pip + `requirements.txt`):
+Dependencies are managed by `uv`:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python -m proxy_ace.app
+uv sync --frozen
+ACEXY_BASE_URL=http://localhost:8090 uv run python -m proxy_ace.app
+uv run pytest
 ```
 
 The server binds `0.0.0.0:80` (through `web.TCPSite(port=80)`), so either run
@@ -38,12 +40,9 @@ The database path is the container path `/app/data/proxies.db`. For a
 non-Docker run, mount or create that directory, or change `DB_PATH` in a local
 patch. Do not commit a local path change.
 
-Planned uv flow:
-
-```bash
-uv sync
-uv run python -m proxy_ace.app
-```
+`ACEXY_BASE_URL` is read from the environment at request time. A local value is
+`http://localhost:8090` when the browser runs on the Docker host; use the host
+IP when the browser is elsewhere. Without it, `/ace` returns 503.
 
 ## Add or change a redirect route
 
@@ -53,17 +52,23 @@ uv run python -m proxy_ace.app
    opening `aiosqlite` in the handler.
 4. If it changes a redirect, mark the model `dirty` and persist through
    `update_redirects()`.
-5. Update `README.md`, `docs/architecture.md` and the deployment checklist if
+5. Add or update tests in `tests/`.
+6. Update `README.md`, `docs/architecture.md` and the deployment checklist if
    the public contract changes.
-6. Push `dev`, verify `/yt_dlp/...`, then merge `main`.
+7. Push `dev`, verify `/yt_dlp/...` or `/ace/...`, then merge `main`.
 
-Keep the unknown-channel contract: channel → `placeholder` → 404.
+Keep the unknown-channel contract: `/yt_dlp`: channel → `placeholder` → 404.
+`/ace`: unknown name → 404; no placeholder fallback.
+
+`/ace` must return a client-reachable URL. Do not use the Docker service name
+`acexy` as the base URL; clients do not resolve it. Use
+`ace.build_acexy_stream_url()` instead of concatenating strings.
 
 ## Add a database column or table
 
 The schema is created only with `CREATE TABLE IF NOT EXISTS`; there is no
-migration runner. A new column works automatically for a brand-new database
-but not for an existing one.
+migration runner. A new table works automatically for a brand-new database and
+for an existing one on the next startup. A new column does not.
 
 1. Change `CREATE_TABLES_SQL` in `proxy_ace/db.py`.
 2. Update `proxy_ace/repo.py` and the model.
@@ -77,6 +82,10 @@ Never mutate `proxies.db` on the host by hand while the manager is running.
 Use the pre-deploy backup or a one-shot `docker exec` with `sqlite3`, and keep
 the result in the deployment log.
 
+`ace_channels` was added additively. The old `ace_streaming_channels` is no
+longer created; an existing database may keep an empty orphan until the
+optional cleanup in [roadmap.md](roadmap.md).
+
 ## Resolver notes
 
 `config.py` runs `yt-dlp` in a separate process because extraction is
@@ -88,75 +97,48 @@ synchronous and can block for seconds. When changing it:
 - remember `ttl = -1` means “eternal” and a future timestamp means “valid”;
 - log failures without logging source credentials or query secrets.
 
+ACE channels do not use the resolver: they are a name plus a content id and are
+served directly as a redirect.
+
 ## Tests
 
-There is currently no automated test suite. `test.py` is a manual
-`yt-dlp` probe against a fixed URL and is excluded from the Docker context.
+Tests use `pytest` + `pytest-aiohttp` and do not need the network:
 
-Before adding tests, prefer small unit tests for pure functions
-(`ttl` extraction, fallback selection, URL construction). A future test run
-should use a temporary SQLite file and a fake resolver; no test should hit a
-real streaming site or require the network.
-
-## uv migration
-
-This is planned; do it in a dedicated change, not together with behaviour
-changes.
-
-### Files
-
-- `pyproject.toml` — project metadata, Python requirement, runtime deps,
-  optional `dev` group (pytest, ruff).
-- `uv.lock` — committed lock file.
-- `.python-version` — pin the interpreter used locally and in CI.
-- `Dockerfile` — install from the lock with `uv sync --frozen --no-dev`.
-- `requirements.txt` — either remove after the migration or keep as a generated
-  compatibility export (`uv export`), but never edit it by hand afterwards.
-
-### Suggested Dockerfile shape
-
-```dockerfile
-FROM python:3.11-slim
-
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
-WORKDIR /app
-
-ENV UV_COMPILE_BYTECODE=1 \
-    UV_LINK_MODE=copy \
-    PYTHONUNBUFFERED=1
-
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-
-COPY . ./
-RUN uv sync --frozen --no-dev
-
-ENV PATH="/app/.venv/bin:$PATH"
-EXPOSE 80
-CMD ["python", "-m", "proxy_ace.app"]
+```bash
+uv run pytest
 ```
 
-Pin the uv image by digest or a fixed version in a real change; `latest` above
-is only illustrative. Keep `/app/data` and port 80 unchanged so the Ansible
-compose and healthcheck do not change.
+- `tests/test_ace_url.py` covers URL construction, trailing slashes, encoding,
+  and invalid or missing `ACEXY_BASE_URL`.
+- `tests/test_ace_handler.py` uses a temporary SQLite file and the aiohttp test
+  client to cover 302, 404 and 503, plus the fresh-database table set.
 
-### Migration checklist
+Do not hit a real streaming site in tests. When adding a test for the resolver,
+use a fake resolver or a pure function.
 
-1. Create `pyproject.toml` with the five current runtime dependencies.
-2. `uv lock`; commit `uv.lock` and `.python-version`.
-3. `uv sync --frozen` locally; run the app and the admin UI smoke check.
-4. Update the Dockerfile; build and run the image locally.
-5. Update `README.md`, `AGENTS.md`, `docs/development.md` and
-   `docs/deployment.md`.
-6. Push `dev`; verify the image and `/admin/redirects`.
-7. Merge `main` only after the dev check.
-8. Remove `requirements.txt` in a follow-up commit if nothing consumes it.
+## Dependency management (uv)
 
-Do not change the image name, port, database path or manifest keys as part of
-the uv migration; those are deployment contracts.
+`pyproject.toml` is the source of dependencies; `uv.lock` is committed. The
+image uses `uv sync --frozen --no-dev`, so an out-of-date lock fails the build.
+
+```bash
+uv add <package>          # runtime
+uv add --dev <package>    # tests/tooling
+uv lock                   # after editing pyproject.toml by hand
+uv sync --frozen
+```
+
+Rules:
+
+- do not edit `uv.lock` by hand;
+- keep the Python version at `3.11` (`.python-version`) unless a separate
+  change updates the image and is tested;
+- do not add `requirements.txt` back; `uv export` is only a last-resort
+  compatibility export;
+- keep `/app/data`, port 80 and the image name unchanged.
 
 ## Commit style
 
 One concern per commit, message `type(scope): summary` (for example
-`feat(redirect): add acexy target`, `docs(deploy): document uv migration`).
+`feat(ace): redirect /ace to acexy`, `test(ace): cover URL construction`).
 Do not rewrite history or move tags.

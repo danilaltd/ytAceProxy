@@ -24,18 +24,21 @@ GitHub-hosted runner and deploys immutable digests; it never edits compose.
 Ansible (separate repository `arch2debian`) owns compose, ports, volumes,
 healthchecks, hooks and the SQLite backup.
 
-## Current state (snapshot: 2026-11-14)
+## Current state (snapshot: 2026-11-17)
 
 - Both stacks are deployed and healthy: `ytaceproxy-prod` release `prod-8`,
-  `ytaceproxy-dev` release `dev-7`.
+  `ytaceproxy-dev` release `dev-7` at the start of this change.
 - `verify_apps: true`; the last `40_verify` passed.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
 - Application documentation is complete:
   `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/deployment.md`,
   `docs/development.md`, `docs/troubleshooting.md`, `docs/roadmap.md`.
-- Next agreed work is the ACE cleanup, the `/ace` → acexy redirect and the uv
-  migration. Do them as separate changes, dev first.
+- Done on `dev`: uv migration, ACE cleanup and the `/ace` → acexy redirect
+  with tests. They are separate commits; `main` is not moved until the dev
+  verification passes.
+- Next agreed work: tests/health follow-ups and the optional removal of the
+  host-published `acestream` ports.
 
 The release numbers above are a snapshot, not an invariant. Check before
 relying on them:
@@ -64,7 +67,7 @@ ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.js
 
 | Layer | Repository | Responsibility |
 |---|---|---|
-| application | `danilaltd/ytAceProxy` (this repo) | `proxy_ace/*`, Dockerfile, requirements/uv lock, admin templates |
+| application | `danilaltd/ytAceProxy` (this repo) | `proxy_ace/*`, tests, Dockerfile, `pyproject.toml`/`uv.lock`, admin templates |
 | release pipeline | `.github/workflows/release.yml` | build, companion digests, manifest, Tailscale + forced-command deploy |
 | server infrastructure | `danilaltd/arch2debian` | compose, exposure matrix, data dirs, pre/post hooks, wrapper allowlist, verify |
 | server state | `/var/lib/deploy/<app>` | `manifest.json`, `manifest.prev.json`, log |
@@ -77,13 +80,17 @@ client ──GET /yt_dlp/<name>──▶ manager :80 (aiohttp)
                                   ├─ redirect_channels in proxies.db
                                   └─ yt-dlp subprocess (timeout 60 s)
 
-client ──GET /ace/...──────────▶ acexy :80 ──▶ acestream engine :6878
-                                  (companion images, not this service)
+client ──GET /ace/<name>─────▶ manager :80 (aiohttp)
+                                  │
+                                  ├─ ace_channels in proxies.db
+                                  └─ 302 ──▶ acexy :80 ──▶ acestream engine :6878
+                                             (companion images, not this service)
 ```
 
 The manager, `acestream` and `acexy` are separate containers in the same
 compose project. The manager does not stream video itself; it only resolves
-links and redirects. The `/ace` redirect into `acexy` is planned, not current.
+links and redirects. `ACEXY_BASE_URL` must be an address the **client** can
+reach, not the Docker DNS name `acexy`.
 
 ## Git workflow
 
@@ -130,11 +137,13 @@ Read these before changing anything.
 3. **Schema is auto-created, not migrated.** `init_db()` runs
    `CREATE TABLE IF NOT EXISTS`. There is no migration framework. A schema
    change is a deploy-time risk; take a backup before deploying.
-4. **`redirect_channels` is the active table.** `ace_streaming_channels` is
-   legacy and must not gain new writes. See [docs/roadmap.md](docs/roadmap.md).
-5. **Unknown channel falls back to `placeholder`.** If neither the channel nor
-   `placeholder` has a `redirect_url`, `/yt_dlp/{name}` returns 404. Do not
-   change this contract silently.
+4. **`redirect_channels` and `ace_channels` are the active tables.** The old
+   `ace_streaming_channels` is not created by current code; existing databases
+   may keep an empty orphan until the optional cleanup. See
+   [docs/roadmap.md](docs/roadmap.md).
+5. **Unknown yt-dlp channel falls back to `placeholder`.** If neither the
+   channel nor `placeholder` has a `redirect_url`, `/yt_dlp/{name}` returns
+   404. Do not change this contract silently.
 6. **URL resolution is out-of-process.** `yt-dlp` runs in a separate process
    with a 60-second timeout and a concurrency limit of 2. Never call
    `yt-dlp` inline in the event loop.
@@ -152,22 +161,24 @@ Read these before changing anything.
     untracked. Runtime secrets, if added, go through Ansible Vault and `.env`.
 12. **Do not restore the old `channels.db`.** It is a different JSON-era
     store; `proxies.db` is the SQLite database.
+13. **`/ace/{name}` is a redirect, not a proxy.** It returns 302 to
+    `ACEXY_BASE_URL/ace/getstream?id=<content_id>`; unknown names return 404,
+    a missing `ACEXY_BASE_URL` returns 503. Never use `http://acexy:80` as the
+    client-facing base URL.
 
 ## Commands
 
 ```bash
-# local (current pip flow)
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m proxy_ace.app
-
-# local (planned uv flow)
-uv sync
-uv run python -m proxy_ace.app
+# local
+uv sync --frozen
+ACEXY_BASE_URL=http://localhost:8090 uv run python -m proxy_ace.app
+uv run pytest
 
 # image
 docker build -t ytaceproxy-proxy .
-docker run --rm -p 8089:80 -v "$PWD/data:/app/data" ytaceproxy-proxy
+docker run --rm -p 8089:80 \
+  -e ACEXY_BASE_URL=http://localhost:8090 \
+  -v "$PWD/data:/app/data" ytaceproxy-proxy
 
 # CI status
 gh run list --repo danilaltd/ytAceProxy --workflow Release
@@ -188,9 +199,9 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
 |---|---|
 | endpoints, data model, runtime flow | [docs/architecture.md](docs/architecture.md) |
 | how to deploy, environments, change matrix, rollback | [docs/deployment.md](docs/deployment.md) |
-| local run, adding routes, uv migration | [docs/development.md](docs/development.md) |
+| local run, adding routes, tests, uv | [docs/development.md](docs/development.md) |
 | real failures and fixes | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| planned ACE cleanup / acexy redirect / uv | [docs/roadmap.md](docs/roadmap.md) |
+| planned tests/health and acestream exposure | [docs/roadmap.md](docs/roadmap.md) |
 | Ansible role, ports, hooks | `arch2debian/roles/ytaceproxy/README.md` |
 | manifest contract and wrapper | `arch2debian/docs/ci-cd.md` |
 
@@ -198,11 +209,12 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
 
 | Change | Touch |
 |---|---|
-| redirect behaviour / new route | `proxy_ace/handler.py`, `proxy_ace/app.py`, tests, push `dev` |
+| redirect behaviour / new route | `proxy_ace/handler.py`, `proxy_ace/app.py`, `tests/`, push `dev` |
+| ACE channel redirect / URL builder | `proxy_ace/ace.py`, `proxy_ace/repo.py`, `proxy_ace/handler.py` |
 | admin UI | `proxy_ace/admin_routes.py`, `proxy_ace/forms/*.html` |
 | resolver format/timeout | `proxy_ace/config.py` |
 | DB columns/tables | `proxy_ace/db.py`, `proxy_ace/repo.py`, `post-deploy.sh.j2`, backup |
-| Python dependencies | `requirements.txt` now; `pyproject.toml` + `uv.lock` after uv migration |
+| Python dependencies | `pyproject.toml` + `uv.lock`; never edit `uv.lock` by hand |
 | base image / runtime | `Dockerfile`; keep port 80 and `/app/data` |
 | published port / bind | `arch2debian/inventory/group_vars/debian_servers/exposure.yml` |
 | compose service, volume, healthcheck, logging | `arch2debian/roles/ytaceproxy/templates/docker-compose.yml.j2` |
@@ -232,11 +244,10 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
 
 The next agreed work is:
 
-1. remove the remaining ACE artifacts (`ace_streaming_channels`, the
-   `load_channels` stub) and add a convenient `/ace/{name}` redirect to
-   `acexy`;
-2. migrate to `uv` (`pyproject.toml`, `uv.lock`, Dockerfile, docs);
-3. add tests and a small health endpoint.
+1. add a small `/health` endpoint and structured logging improvements;
+2. remove the host-published `acestream` ports after all clients use `/ace`
+   through `acexy`;
+3. revisit memory limits after a week of `docker stats` data.
 
 Do not implement these silently as part of an unrelated change; use
 [docs/roadmap.md](docs/roadmap.md).

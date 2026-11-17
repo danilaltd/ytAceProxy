@@ -150,10 +150,11 @@ The wrapper prints `=== deploy failed` and rolls the image back to
 ssh asus@debian "sudo tail -n 120 /var/log/deploy/ytaceproxy-dev.log"
 ```
 
-The post-deploy hook checks `PRAGMA integrity_check`, the required tables and
-the redirect count. A failed check means the new image cannot use the current
-database. The image is rolled back; the database is **not**. Restore the last
-`pre-*.db` backup if the schema is incompatible.
+The post-deploy hook checks `PRAGMA integrity_check`, the required tables
+(`redirect_channels` and, when enabled, `ace_channels`) and the redirect count.
+A failed check means the new image cannot use the current database. The image
+is rolled back; the database is **not**. Restore the last `pre-*.db` backup if
+the schema is incompatible.
 
 ## Application
 
@@ -181,6 +182,50 @@ Add or fix the redirect in `/admin/redirects`, or add a `placeholder` row.
 `ttl` is in the past. Use `/yt_dlp/<name>/upd` or the admin sync action to
 re-resolve. If `yt-dlp` fails, the old `redirect_url` remains; check the manager
 logs.
+
+### `/ace/<name>` returns 404
+
+Expected when `ace_channels` has no row with that name. Add it at
+`/admin/ace`; the content id must be 40 hexadecimal characters. Check:
+
+```bash
+ssh asus@debian "sudo docker exec -i ytaceproxy-dev-manager-1 python - <<'PY'
+import sqlite3
+c = sqlite3.connect('/app/data/proxies.db')
+print(c.execute('select id,name,content_id from ace_channels').fetchall())
+PY"
+```
+
+### `/ace/<name>` returns 503
+
+`ACEXY_BASE_URL` is missing or invalid. The value must be an absolute
+`http`/`https` origin, for example `http://<tailnet-ip>:8091`, not the Docker
+name `http://acexy:80`.
+
+```bash
+ssh asus@debian "sudo docker exec ytaceproxy-dev-manager-1 printenv ACEXY_BASE_URL"
+```
+
+If it is empty, fix the Ansible compose template and run `30_services`; do not
+edit `/srv/ytaceproxy-dev/docker-compose.yml` by hand.
+
+### `/ace/<name>` redirects to the wrong acexy port
+
+The manager uses the `ACEXY_BASE_URL` of its environment: prod `8090`, dev
+`8091`. Check the env value and the published port; a copied compose file or a
+wrong inventory value is the usual cause. Re-run `30_services`.
+
+### `uv sync --frozen` fails after changing dependencies
+
+`pyproject.toml` and `uv.lock` are out of sync. Run `uv lock`, commit
+`uv.lock`, then `uv sync --frozen`. Do not edit `uv.lock` by hand and do not
+re-add `requirements.txt`.
+
+### Docker build cannot download `uv`
+
+The Dockerfile pins `ghcr.io/astral-sh/uv:<version>` as a build stage. If the
+tag is unavailable, update the pin in `Dockerfile` and rebuild; do not replace
+it with `latest`.
 
 ### Admin UI returns 500 after a local run
 
@@ -237,6 +282,6 @@ not restore its rows into `redirect_channels`; the formats are unrelated.
 
 - deployment and change matrix: [deployment.md](deployment.md)
 - runtime/data model: [architecture.md](architecture.md)
-- planned ACE/acexy/uv work: [roadmap.md](roadmap.md)
+- planned health/logging and acestream exposure work: [roadmap.md](roadmap.md)
 - Ansible-side incidents: `arch2debian/docs/ci-cd.md`,
   `arch2debian/roles/ytaceproxy/README.md`

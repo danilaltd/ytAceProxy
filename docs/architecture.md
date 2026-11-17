@@ -1,33 +1,36 @@
 # Architecture
 
 The service has two responsibilities: resolve a source URL with `yt-dlp` and
-return a 302 redirect; manage the named redirects through a small admin UI.
-Video playback is handled by the companion `acexy`/`acestream` stack, not by
-this application.
+return a 302 redirect; map a named ACE channel to a 302 redirect into `acexy`.
+Both mappings are managed through a small admin UI. Video playback is handled by
+the companion `acexy`/`acestream` stack, not by this application.
 
 ## Components
 
 ```text
                        ┌─────────────────────────────┐
 client ──HTTP─────────▶│ manager (aiohttp, port 80)  │
-                       │  /yt_dlp, /admin/redirects  │
+                       │  /yt_dlp, /ace, /admin/*    │
                        └──────────────┬──────────────┘
                                       │
                        ┌──────────────▼──────────────┐
                        │ SQLite /app/data/proxies.db │
                        │ redirect_channels           │
+                       │ ace_channels                │
                        └──────────────┬──────────────┘
-                                      │ yt-dlp subprocess
-                                      ▼
-                              source URL resolution
-
-client ──HTTP─────────▶ acexy (port 80) ──▶ acestream engine (6878)
-                       companion containers, separate from the manager
+                                      │
+                 ┌────────────────────┴───────────────────┐
+                 │ yt-dlp subprocess                      │ 302 Location
+                 ▼                                        ▼
+        source URL resolution                     acexy (port 80)
+                                                  └─▶ acestream engine (6878)
 ```
 
 In a deployed environment the three containers share a compose project and a
 private Docker network, but only the manager and `acexy` publish host ports.
-`acestream` is reachable by `acexy` under the service name `acestream`.
+`acestream` is reachable by `acexy` under the service name `acestream`. The
+manager never proxies video: `/ace/{name}` returns a redirect and the media
+connection is between the client and `acexy`/`acestream`.
 
 ## Request flow
 
@@ -49,18 +52,41 @@ private Docker network, but only the manager and `acexy` publish host ports.
 resolution for the requested name and writes changed rows back. The endpoint
 returns `200 text/plain` even if the resolver failed; failures are logged.
 
+### `GET /ace/{channel}`
+
+1. `handler.ace_handler` reads `{channel}` from the route.
+2. `repo.get_ace_content_id(name)` selects `content_id` from `ace_channels`.
+3. An unknown name returns `404`.
+4. `ace.build_acexy_stream_url()` builds
+   `<ACEXY_BASE_URL>/ace/getstream?id=<urlencoded content_id>`.
+5. A missing or invalid `ACEXY_BASE_URL` returns `503`; the content id is not
+   written to the logs.
+6. `redirect_response()` returns `302`. The client connects to `acexy`
+   directly.
+
+`ACEXY_BASE_URL` is rendered by Ansible from the per-environment published
+acexy address (prod `8090`, dev `8091`). It must be reachable by the client;
+the Docker DNS name `acexy` is not.
+
+`/ace` names are a separate namespace from `/yt_dlp` names. A name can have a
+yt-dlp redirect and an ACE content id at the same time.
+
 ### Admin UI
 
-`admin_routes.py` exposes list/add/edit/delete/sync routes. The UI is a
-Jinja2 template under `proxy_ace/forms/`. After add, the handler starts a
-background `sync_channels()` task. The sync route does the same for all rows.
+`admin_routes.py` exposes two lists:
+
+- `/admin/redirects` — yt-dlp redirects; add/edit/delete/sync. After add, the
+  handler starts a background `sync_channels()` task. The sync route does the
+  same for all rows.
+- `/admin/ace` — ACE channels; add/edit/delete. A channel is only a name and a
+  40-character content id; there is no resolver and no TTL.
 
 The admin UI is deliberately unauthenticated because the published port is
 bound to the Tailscale IP. Do not expose it on the LAN or the internet.
 
 ## Resolver
 
-`config.py` owns URL resolution.
+`config.py` owns yt-dlp URL resolution.
 
 - `python_yt_dlp_get_link(url)` uses
   `yt-dlp --quiet --skip-download --format best[acodec!=none]`.
@@ -92,21 +118,23 @@ redirect_channels (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 
-ace_streaming_channels (
+ace_channels (
     id INTEGER PRIMARY KEY,
     name TEXT UNIQUE NOT NULL,
-    url TEXT NOT NULL
+    content_id TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 ```
 
-`redirect_channels` is the only table used by the current handlers.
-`ace_streaming_channels` is a leftover from the removed ACE streaming design.
-The post-deploy hook still checks that it exists; that check goes away with the
-ACE cleanup.
+`redirect_channels` is the yt-dlp table. `ace_channels` stores the AceStream
+content id/hash used by `/ace/{name}`. The old `ace_streaming_channels` table
+is no longer created; existing databases may keep an empty orphan until the
+optional cleanup in [roadmap.md](roadmap.md).
 
-There are **no migrations**. `init_db()` only creates missing tables. If a
-column changes, an existing database will not be altered automatically. The
-safe procedure is:
+There are **no migrations**. `init_db()` only creates missing tables. Adding
+`ace_channels` is additive and works on an existing database. If a column
+changes, an existing database will not be altered automatically. The safe
+procedure is:
 
 1. run a pre-deploy backup (`/srv/ytaceproxy-<env>/pre-deploy.sh manual`);
 2. deploy the new image;
@@ -125,6 +153,7 @@ Ansible defines two independent environments in
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
 | acestream | `6878` | `6879` |
 | acexy | `8090` | `8091` |
+| `ACEXY_BASE_URL` | `http://<tailnet-ip>:8090` | `http://<tailnet-ip>:8091` |
 | data | `/var/lib/ytaceproxy-prod` | `/var/lib/ytaceproxy-dev` |
 | backups | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 
@@ -142,31 +171,22 @@ the `companions` job; they are not built here.
 - `pre-deploy.sh` creates a consistent SQLite backup before the image switch.
   It skips the backup only when the manager is not running or `proxies.db`
   does not exist yet.
-- `post-deploy.sh` checks `PRAGMA integrity_check`, the required tables and the
-  redirect count. A failure makes the deploy wrapper roll the **image** back
-  to `manifest.prev.json`; the database is not rolled back automatically.
+- `post-deploy.sh` checks `PRAGMA integrity_check`, `redirect_channels`,
+  `ace_channels` when required by the role, and the redirect count. A failure
+  makes the deploy wrapper roll the **image** back to `manifest.prev.json`;
+  the database is not rolled back automatically.
 - `30_services` reads `/var/lib/deploy/<app>/manifest.json`, writes
   `/srv/<app>/deploy-images.env` and passes it to compose. Without a manifest
   it uses the bootstrap tag from `ytaceproxy_environments`.
 - Every service uses the `json-file` log driver with `max-size=10m` and
   `max-file=3`.
 
-## Planned architecture change: acexy redirect
+## ACE redirect
 
-The intended replacement for the old ACE path is a redirect endpoint, for
-example:
+`/ace/{name}` replaces the old ACE streaming path. The old `/ace/{channel}`
+video-streaming implementation is gone; the current route only redirects to
+`acexy`. Content ids live in `ace_channels`, not in `redirect_channels`.
 
-```text
-GET /ace/{name}  →  302 http://<tailnet-ip>:<acexy-port>/ace/getstream?id=<content-id>
-```
-
-The manager needs the per-environment acexy base URL (prod `8090`, dev `8091`)
-because it is a different published port. The planned implementation adds an
-environment variable (for example `ACEXY_BASE_URL`) to the compose template,
-looks up the content id in the database and returns a 302. The design has to
-decide whether `url` stores a source URL (for yt-dlp) or a content id (for
-acexy); do not overload one column silently.
-
-The old `/ace/{channel}` video-streaming implementation is already gone. The
-remaining ACE artifacts are the legacy table and a stub; see
+The optional cleanup of the legacy `ace_streaming_channels` table and the
+optional removal of the host-published `acestream` port are tracked in
 [roadmap.md](roadmap.md).
