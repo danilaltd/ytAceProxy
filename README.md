@@ -18,7 +18,7 @@ builds the image and changes only image digests.
 
 ## Current state
 
-Snapshot (2026-11-17): `ytaceproxy-dev` release `dev-9` has the uv migration,
+Snapshot (2026-11-17): `ytaceproxy-dev` release `dev-10` has the uv migration,
 the ACE cleanup and the `/ace` → acexy redirect. `ytaceproxy-prod` remains on
 `prod-8` and the change is not merged to `main`. Release numbers are a
 snapshot, not an invariant — check `/var/lib/deploy/<app>/manifest.json` or the

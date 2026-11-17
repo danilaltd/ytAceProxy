@@ -27,7 +27,7 @@ healthchecks, hooks and the SQLite backup.
 ## Current state (snapshot: 2026-11-17)
 
 - Both stacks are healthy: `ytaceproxy-prod` release `prod-8` and
-  `ytaceproxy-dev` release `dev-9`.
+  `ytaceproxy-dev` release `dev-10`.
 - `dev` has the uv migration, ACE cleanup and the `/ace` → acexy redirect with
   tests. The dev database no longer has `ace_streaming_channels`; the pre-clean
   backup is in `/var/backups/ytaceproxy/dev/`.
