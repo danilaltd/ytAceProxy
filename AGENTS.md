@@ -20,11 +20,12 @@ Docker image and deployed as two independent stacks:
 | backup | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 
 The image is `ghcr.io/danilaltd/ytaceproxy-proxy`. CI builds it on a
-GitHub-hosted runner and deploys immutable digests; it never edits compose.
-Ansible (separate repository `arch2debian`) owns compose, ports, volumes,
-healthchecks, hooks and the SQLite backup.
+GitHub-hosted runner and deploys immutable digests plus the compose shape
+(`deploy/compose/docker-compose.yml`). Ansible (separate repository
+`arch2debian`) owns `.env` values (ports, binds, data dirs), hooks and the
+SQLite backup; until wrapper v2 it also renders compose.
 
-## Current state (snapshot: 2026-11-17)
+## Current state (snapshot: 2026-11-19)
 
 - Both stacks are healthy: `ytaceproxy-prod` release `prod-8` and
   `ytaceproxy-dev` release `dev-10`.
@@ -40,6 +41,12 @@ healthchecks, hooks and the SQLite backup.
 - `verify_apps: true`; the last `40_verify` passed.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
+- `deploy/compose/` holds the server compose shape (`docker-compose.yml`),
+  `env.required` and the CI fixture `ci.env`. The release workflow validates
+  the compose with the fixture, embeds it in manifest v2 (`config.compose_b64`,
+  `config.compose_sha256`, `config.required_env`) and checks the hash and the
+  env list. The installed wrapper is still v1 and rejects `config`: **do not
+  push `dev` until wrapper v2 and `31_apps` are installed.**
 - Application documentation is complete:
   `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/deployment.md`,
   `docs/development.md`, `docs/troubleshooting.md`, `docs/roadmap.md`.
@@ -155,9 +162,11 @@ Read these before changing anything.
    `yt-dlp` inline in the event loop.
 7. **Admin UI is tailnet-only.** There is no basic auth and no production
    approval. Do not add a public bind or an auth bypass.
-8. **CI only changes image digests.** Compose, ports, volumes, hooks and
-   backups are Ansible-managed. If a change needs a new file under `/srv` or
-   `/etc`, change the Ansible role/template, not the host.
+8. **CI ships image digests and the compose shape.** The server compose is
+   `deploy/compose/docker-compose.yml`, embedded in manifest v2. `.env` values
+   (ports, binds, `DATA_DIR`, `ACEXY_BASE_URL`), hooks and backups remain
+   Ansible-managed. Until wrapper v2 is installed, `30_services` still renders
+   the compose from the role template; never edit `/srv` by hand.
 9. **Deploy references are immutable digests.** The forced command accepts
    only `ghcr.io/...@sha256:<64hex>` from the per-app allowlist. There is no
    tag fallback.
@@ -223,7 +232,8 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
 | Python dependencies | `pyproject.toml` + `uv.lock`; never edit `uv.lock` by hand |
 | base image / runtime | `Dockerfile`; keep port 80 and `/app/data` |
 | published port / bind | `arch2debian/inventory/group_vars/debian_servers/exposure.yml` |
-| compose service, volume, healthcheck, logging | `arch2debian/roles/ytaceproxy/templates/docker-compose.yml.j2` |
+| compose service, volume, healthcheck, logging | `deploy/compose/docker-compose.yml` (release; until wrapper v2, also the Ansible template) |
+| required `.env` names / compose CI fixture | `deploy/compose/env.required`, `deploy/compose/ci.env` |
 | pre/post deploy hooks | `arch2debian/roles/ytaceproxy/templates/*.j2` |
 | companion image versions | `.github/workflows/release.yml` env + Ansible role defaults |
 | manifest keys / allowlist | workflow `assert`, `arch2debian/roles/deploy/templates/deploy-app-root.j2` |

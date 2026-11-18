@@ -56,25 +56,39 @@ A push to `dev` or `main` triggers `.github/workflows/release.yml`.
 push to dev/main
   └─ security-scan (Gitleaks, full history)
   └─ build (GitHub-hosted runner)
+       └─ docker compose config -q (deploy/compose, fixture env)
        └─ docker build, push ghcr.io/danilaltd/ytaceproxy-proxy:<env>-<run>
        └─ artifact: manager <repo>@sha256:<digest>
   └─ companions
        └─ resolve pinned acestream and acexy tags to digests
   └─ deploy
-       ├─ build manifest {app, release, images{manager,acestream,acexy}}
+       ├─ build manifest v2: {app, release, images, config}
+       │    config = {compose_b64, compose_sha256, required_env}
        ├─ base64url-encode manifest
        ├─ join tailnet (OAuth, tag:ci, ping debian)
        └─ ssh deploy@debian "ytaceproxy-<env> <release> <manifest>"
             └─ deploy-app (forced command, argument validation)
                  └─ sudo deploy-app-root
                       ├─ allowlist: app, release prefix, exactly 3 digest refs
+                      ├─ validate config: compose size/hash, required_env
                       ├─ atomic manifest.json, save manifest.prev.json
+                      ├─ write the compose from the manifest
                       ├─ pre-deploy.sh  (consistent SQLite backup)
                       ├─ docker compose pull
                       ├─ docker compose up -d --remove-orphans --wait
                       ├─ post-deploy.sh (integrity, tables, redirect count)
-                      └─ on failure: roll back image refs to manifest.prev.json
+                      └─ on failure: previous manifest images + compose
 ```
+
+> **Manifest v2 is prepared here, not active yet.** The workflow in this
+> branch embeds `deploy/compose/docker-compose.yml` into the manifest and
+> validates it with `deploy/compose/ci.env`. The installed wrapper is still v1
+> and rejects a manifest that has a `config` key, so pushing this workflow to
+> `dev` before wrapper v2 and `31_apps` are installed fails every deploy.
+> Until then `/srv/<app>/docker-compose.yml` is still rendered by
+> `30_services` from the Ansible template. After the rollout the compose in
+> this repository is the source of truth and `30_services` no longer writes
+> it.
 
 Details:
 
@@ -166,10 +180,10 @@ healthcheck and `redirect_channels` check are enough.
 
 | Change | Edit | Then |
 |---|---|---|
-| published port or bind address | `arch2debian/inventory/group_vars/debian_servers/exposure.yml` (`ytace_<env>_*`) | `30_services`, `40_verify` |
-| service, volume, healthcheck, logging | `arch2debian/roles/ytaceproxy/templates/docker-compose.yml.j2` | `30_services`, `40_verify` |
-| manager `ACEXY_BASE_URL` | `arch2debian/roles/ytaceproxy/templates/docker-compose.yml.j2` | `30_services`; must be client-reachable, not Docker DNS |
-| data/cache directory layout | `roles/ytaceproxy/tasks/environment.yml`, defaults | `30_services` |
+| published port or bind address | `arch2debian/inventory/group_vars/debian_servers/exposure.yml` (`ytace_<env>_*`) | `.env` via Ansible, then firewall/verify |
+| service, volume, healthcheck, logging | `deploy/compose/docker-compose.yml` (release-owned); until wrapper v2 also the Ansible template | release; `40_verify` |
+| manager `ACEXY_BASE_URL` | `deploy/compose/docker-compose.yml` reads `${ACEXY_BASE_URL}`; the value comes from Ansible `.env` | must be client-reachable, not Docker DNS |
+| data/cache directory layout | `roles/ytaceproxy/tasks/environment.yml`, defaults; compose uses `${DATA_DIR}` | `30_services` / `31_apps` |
 | pre/post hook behaviour | `roles/ytaceproxy/templates/*.j2` | `30_services` |
 | environment-specific ports | `inventory/group_vars/debian_servers/main.yml` (`ytaceproxy_environments`) + `exposure.yml` | `30_services`, `40_verify` |
 | bootstrap tag | `ytaceproxy_environments[].default_tag` | `30_services` only before a manifest exists |
@@ -191,17 +205,21 @@ When changing a companion version or adding a service:
 
 1. update the tag in `.github/workflows/release.yml`;
 2. update `roles/ytaceproxy/defaults/main.yml` if the bootstrap default changes;
-3. update the `companions` resolver and the manifest `assert` if the key set
-   changes;
+3. update the `companions` resolver if the image key set changes;
 4. update the allowlist in
    `arch2debian/roles/deploy/templates/deploy-app-root.j2` (exact key set and
    registry/repository regex);
-5. update the compose template and the role's `deploy-images.env` writer;
+5. update `deploy/compose/docker-compose.yml` and `deploy/compose/env.required`
+   (also the Ansible template until wrapper v2 is installed);
 6. update `roles/verify` and this documentation;
 7. push `dev`, verify, then merge `main`.
 
-The manifest key set is exact. The wrapper rejects a missing key, an extra key
-or a tag instead of a digest.
+The manifest key set is exact: `app`, `config`, `images`, `release`.
+`images` has exactly `manager`, `acestream`, `acexy`; `config` has exactly
+`compose_b64`, `compose_sha256` (over the decoded bytes, at most 256 KiB) and
+`required_env` (copied from `deploy/compose/env.required`, sorted, unique). The
+wrapper rejects a missing or extra key, a tag instead of a digest, a compose
+hash mismatch and a missing `.env` name.
 
 ### 5.5 Deploy wrapper and verification
 

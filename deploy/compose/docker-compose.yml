@@ -1,0 +1,68 @@
+# Server-side stack shape for ytaceproxy-{dev,prod}.
+#
+# Host values (binds, ports, data dir, ACEXY_BASE_URL) come from
+# /srv/<app>/.env; image references come from the digest manifest. The release
+# workflow embeds this file in the manifest, so a change here is a release.
+services:
+  manager:
+    image: "${MANAGER_IMAGE_REF:?MANAGER_IMAGE_REF is required}"
+    restart: always
+    ports:
+      - "${MANAGER_BIND:?MANAGER_BIND is required}:${MANAGER_PORT:?MANAGER_PORT is required}:80"
+    volumes:
+      - "${DATA_DIR:?DATA_DIR is required}/manager-data:/app/data"
+    environment:
+      # Client-facing acexy address: /ace/{name} returns this in Location.
+      # Docker DNS name "acexy" is not reachable by the player.
+      ACEXY_BASE_URL: "${ACEXY_BASE_URL:?ACEXY_BASE_URL is required}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 80), 2).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  acestream:
+    image: "${ACESTREAM_IMAGE_REF:?ACESTREAM_IMAGE_REF is required}"
+    restart: always
+    ports:
+      - "${ACESTREAM_BIND:?ACESTREAM_BIND is required}:${ACESTREAM_PORT:?ACESTREAM_PORT is required}:6878"
+    environment:
+      - ALLOW_REMOTE_ACCESS=yes
+      - "EXTRA_FLAGS=--cache-limit 1"
+    volumes:
+      - "${DATA_DIR:?DATA_DIR is required}/acestream-cache:/home/appuser/.ACEStream"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  acexy:
+    image: "${ACEXY_IMAGE_REF:?ACEXY_IMAGE_REF is required}"
+    restart: unless-stopped
+    ports:
+      - "${ACEXY_BIND:?ACEXY_BIND is required}:${ACEXY_PORT:?ACEXY_PORT is required}:80"
+    environment:
+      ACEXY_LISTEN_ADDR: ":80"
+      ACEXY_SCHEME: "http"
+      ACEXY_HOST: "acestream"
+      ACEXY_PORT: "6878"
+      ACEXY_M3U8_STREAM_TIMEOUT: "60s"
+      ACEXY_M3U8: "false"
+      ACEXY_EMPTY_TIMEOUT: "60s"
+      ACEXY_BUFFER_SIZE: "4MB"
+      ACEXY_NO_RESPONSE_TIMEOUT: "10s"
+      ACEXY_CLIENT_EVICTION_TIMEOUT: "5s"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      - acestream
