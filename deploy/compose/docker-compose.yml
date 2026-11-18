@@ -15,6 +15,9 @@ services:
       # Client-facing acexy address: /ace/{name} returns this in Location.
       # Docker DNS name "acexy" is not reachable by the player.
       ACEXY_BASE_URL: "${ACEXY_BASE_URL:?ACEXY_BASE_URL is required}"
+    labels:
+      # The wrapper policy checks published binds against this address.
+      io.arch2debian.tailscale-ip: "${TAILSCALE_IP:?TAILSCALE_IP is required}"
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 80), 2).close()"]
       interval: 30s
