@@ -74,31 +74,56 @@ A tag, a foreign repository, a missing key or an extra key is rejected before
 Docker. Check the workflow manifest assertion and
 `arch2debian/roles/deploy/templates/deploy-app-root.j2`.
 
-### Deploy job: `missing compose file`
+### First release: `missing compose file`
 
-`30_services` was not run on the server, so `/srv/<app>/docker-compose.yml`
-does not exist. Run `30_services.yml -e ansible_host=debian`, then retry.
+A stack that has never been released has no `/srv/<app>/docker-compose.yml`.
+That is expected: `30_services` is host-only and `31_apps` writes only `.env`,
+hooks and `compose.sh`. The first release writes compose and starts the stack.
+Do not create a compose file by hand.
+
+### `compose sha256 mismatch` / `required env ... missing`
+
+`config.compose_sha256` must match `deploy/compose/docker-compose.yml`, and
+every name from `deploy/compose/env.required` must exist non-empty in
+`/srv/<app>/.env`.
+
+```bash
+sha256sum deploy/compose/docker-compose.yml
+ssh asus@debian "sudo jq -r .config.compose_sha256 /var/lib/deploy/ytaceproxy-dev/manifest.json"
+ssh asus@debian "sudo jq -r '.config.required_env[]' /var/lib/deploy/ytaceproxy-dev/manifest.json"
+ssh asus@debian "sudo grep -E '^(DATA_DIR|TAILSCALE_IP|ACEXY_BASE_URL)=' /srv/ytaceproxy-dev/.env"
+```
+
+For a hash mismatch, re-release the branch that owns the compose. For a
+missing name, update the Ansible `.env` template/Vault and run
+`31_apps -e env=dev|prod` before retrying.
 
 ## Ansible
 
-### `30_services` downgraded the image to the bootstrap tag
+### `compose policy rejected`
 
-Symptom: after a CI deploy, running `30_services` replaced the digest with the
-bootstrap tag (`dev-6` / `prod-4`).
-
-Cause: the role ignored `/var/lib/deploy/<app>/manifest.json`.
-
-Check:
+The wrapper resolves the compose and runs
+`/usr/local/libexec/deploy-compose-policy` before applying it. It rejects host
+escapes (`privileged`, `network_mode: host`, `pid`/`ipc: host`, `devices`,
+`cap_add`), `build`, binds outside `DATA_DIR`, ports outside `arch2debian`'s
+`exposure.yml`, mutable image tags and logging that is not `json-file`
+10m × 3. `env_file` is a source-review rule: Compose merges it into
+`environment` before the wrapper sees the resolved config, and the current CI
+does not scan the source.
 
 ```bash
-ssh asus@debian "sudo jq . /var/lib/deploy/ytaceproxy-dev/manifest.json"
-ssh asus@debian "sudo cat /srv/ytaceproxy-dev/deploy-images.env"
+ssh asus@debian "sudo tail -80 /var/log/deploy/ytaceproxy-dev.log"
 ```
 
-The current role writes `deploy-images.env` when a manifest exists and passes
-it to compose as an env file. If the file is missing, the role is old or the
-playbook did not reach the task. Do not hand-edit the env file; fix the role
-and rerun `30_services`.
+Fix `deploy/compose/docker-compose.yml` and release it. If the port is new,
+update `exposure.yml`, run `15_firewall` and `30_services` (policy), then
+`31_apps` (`.env`).
+
+### `31_apps` refuses to run
+
+`env=prod` and `env=all` require a clean `main` checkout of `arch2debian`;
+commit/stash or use `env=dev`. Tailscale must be running with an IPv4 address,
+because `.env` needs concrete binds.
 
 ### acestream restarts in a loop
 
@@ -115,7 +140,8 @@ owner: "{{ ytaceproxy_acestream_uid }}"
 group: "{{ ytaceproxy_acestream_gid }}"
 ```
 
-Rerun `30_services`. Do not chown `/var/lib/...` by hand.
+Run `31_apps -e env=dev|prod` (the role creates the cache directory). Do not
+chown `/var/lib/...` by hand.
 
 ### Pre-deploy backup fails with `Could not find the file`
 
@@ -150,11 +176,12 @@ The wrapper prints `=== deploy failed` and rolls the image back to
 ssh asus@debian "sudo tail -n 120 /var/log/deploy/ytaceproxy-dev.log"
 ```
 
-The post-deploy hook checks `PRAGMA integrity_check`, the required tables
-(`redirect_channels` and, when enabled, `ace_channels`) and the redirect count.
-A failed check means the new image cannot use the current database. The image
-is rolled back; the database is **not**. Restore the last `pre-*.db` backup if
-the schema is incompatible.
+The post-deploy hook checks `PRAGMA integrity_check`, `redirect_channels` and
+at least one ACE table (`ace_channels` or the legacy
+`ace_streaming_channels` during the transition), plus the redirect count. A
+failed check means the new image cannot use the current database. The image and
+compose are rolled back; the database is **not**. Restore the last `pre-*.db`
+backup if the schema is incompatible.
 
 ## Application
 
@@ -206,14 +233,17 @@ name `http://acexy:80`.
 ssh asus@debian "sudo docker exec ytaceproxy-dev-manager-1 printenv ACEXY_BASE_URL"
 ```
 
-If it is empty, fix the Ansible compose template and run `30_services`; do not
-edit `/srv/ytaceproxy-dev/docker-compose.yml` by hand.
+If it is empty, update the `.env` template/value and run
+`31_apps -e env=dev`, then restart the manager through `compose.sh` or a
+release. Do not edit `/srv/ytaceproxy-dev/docker-compose.yml` by hand; it is
+written from the release manifest.
 
 ### `/ace/<name>` redirects to the wrong acexy port
 
 The manager uses the `ACEXY_BASE_URL` of its environment: prod `8090`, dev
-`8091`. Check the env value and the published port; a copied compose file or a
-wrong inventory value is the usual cause. Re-run `30_services`.
+`8091`. Check the `.env` value and the published port; a copied `.env` or a
+wrong inventory value is the usual cause. Run `31_apps -e env=dev|prod`, then
+restart through `compose.sh` or a release.
 
 ### `uv sync --frozen` fails after changing dependencies
 
@@ -255,9 +285,10 @@ ssh asus@debian "sudo jq -r .images.manager /var/lib/deploy/$APP/manifest.json"
 ssh asus@debian "sudo docker inspect -f '{{.Config.Image}}' $APP-manager-1"
 ```
 
-If they differ, the deploy did not complete or a manual `compose up` used a
-bootstrap tag. Check the deploy log and rerun the release; do not `docker pull`
-a tag by hand.
+If they differ, the deploy did not complete or a manual `docker compose` bypassed
+`compose.sh` and `deploy-images.env`. Check the deploy log and rerun the release;
+do not `docker pull` a tag by hand. `40_verify` also compares the compose hash,
+required env and running images with the manifest.
 
 ### SQLite is read-only or locked
 
@@ -285,3 +316,4 @@ not restore its rows into `redirect_channels`; the formats are unrelated.
 - planned health/logging and acestream exposure work: [roadmap.md](roadmap.md)
 - Ansible-side incidents: `arch2debian/docs/ci-cd.md`,
   `arch2debian/roles/ytaceproxy/README.md`
+- ownership and manifest: `arch2debian/docs/deployment-contract.md`

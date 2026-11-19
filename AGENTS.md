@@ -22,36 +22,65 @@ Docker image and deployed as two independent stacks:
 The image is `ghcr.io/danilaltd/ytaceproxy-proxy`. CI builds it on a
 GitHub-hosted runner and deploys immutable digests plus the compose shape
 (`deploy/compose/docker-compose.yml`). Ansible (separate repository
-`arch2debian`) owns `.env` values (ports, binds, data dirs), hooks and the
-SQLite backup; until wrapper v2 it also renders compose.
+`arch2debian`) owns `.env` values (ports, binds, data dirs), hooks, `compose.sh`
+and the SQLite backup. It does not render compose.
+
+## Deployment model
+
+Canonical contract: `arch2debian/docs/deployment-contract.md`.
+
+| Layer | Owner | Contents |
+|---|---|---|
+| host | `arch2debian` | OS, SSH, network, firewall, Docker |
+| host services | `arch2debian` (`30_services`) | wrapper, compose policy, nginx, AdGuard, CUPS |
+| environment | `arch2debian` (`31_apps -e env=…`) | dirs, `.env`, hooks, `compose.sh`, `env-pins.json` |
+| stack shape | this repository (`deploy/compose/docker-compose.yml`, `env.required`, `ci.env`) | compose and the `.env` contract |
+| release/apply | this repository's release workflow + server wrapper | manifest v2, compose hash, apply/rollback |
+
+- Ansible never writes application compose and never starts application
+  containers.
+  `/srv/<app>/docker-compose.yml` is written only by the wrapper;
+  `/srv/<app>/{.env,compose.sh,pre-deploy.sh,post-deploy.sh}` are
+  Ansible-managed.
+- Manifest v2 is exactly `{app, release, images, config}`;
+  `config = {compose_b64, compose_sha256, required_env}`. Images are digests
+  only; there is no tag fallback.
+- The wrapper checks the schema, allowlist, compose hash, `.env` (root 0600,
+  every required name non-empty) and `/usr/local/libexec/deploy-compose-policy`
+  before applying. The guards reject host escapes/build, binds outside
+  `DATA_DIR`, ports outside `arch2debian`'s exposure matrix, mutable images and
+  non-`json-file` logging. `env_file` is a source-review rule (Compose merges it
+  into `environment`).
+- A compose change is a release with the same digests and a new hash.
+- Commands: `31_apps -e env=dev|prod` for env/hooks, a release for compose,
+  `40_verify` for the contract check.
 
 ## Current state (snapshot: 2026-11-19)
 
-- Both stacks are healthy: `ytaceproxy-prod` release `prod-8` and
-  `ytaceproxy-dev` release `dev-10`.
-- `dev` has the uv migration, ACE cleanup and the `/ace` → acexy redirect with
-  tests. The dev database no longer has `ace_streaming_channels`; the pre-clean
-  backup is in `/var/backups/ytaceproxy/dev/`.
-- `prod` still runs the pre-change image and has no `ACEXY_BASE_URL`; the
-  change is not merged to `main`.
-- The Ansible ACE changes are on the local `arch2debian` `dev` branch and were
-  applied to the dev stack only. Do not run `30_services` from `main` until
-  that branch is merged: it would remove `ACEXY_BASE_URL` from the dev compose
-  and restore the legacy post-deploy table requirement.
+- Both stacks are healthy: `ytaceproxy-prod` release `prod-12` and
+  `ytaceproxy-dev` release `dev-11`, both compose `sha256 c5d9ed96…`.
+- Both stacks run manifest v2 and wrapper v2. `ace_channels` exists on dev and
+  prod; the legacy `ace_streaming_channels` was dropped on prod after the
+  backup `/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db` (dev was
+  cleaned earlier).
+- `ACEXY_BASE_URL` is present on dev and prod; the prod post-deploy check
+  reports `redirects=2`.
+- The post-deploy hook still accepts `ace_channels` **or** the legacy
+  `ace_streaming_channels` during the transition. Tighten it after the next
+  prod release proves the new table on both stacks.
 - `verify_apps: true`; the last `40_verify` passed.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
 - `deploy/compose/` holds the server compose shape (`docker-compose.yml`),
   `env.required` and the CI fixture `ci.env`. The release workflow validates
-  the compose with the fixture, embeds it in manifest v2 (`config.compose_b64`,
-  `config.compose_sha256`, `config.required_env`) and checks the hash and the
-  env list. The installed wrapper is still v1 and rejects `config`: **do not
-  push `dev` until wrapper v2 and `31_apps` are installed.**
-- Application documentation is complete:
-  `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/deployment.md`,
-  `docs/development.md`, `docs/troubleshooting.md`, `docs/roadmap.md`.
-- Next agreed work: verify dev, roll out to prod, then add a health endpoint
-  and remove the host-published `acestream` ports after clients migrate.
+  the compose with the fixture and calls `deploy/build_manifest.py` to build
+  manifest v2 (`config.compose_b64`, `config.compose_sha256`,
+  `config.required_env`).
+- Application documentation is complete: `README.md`, `AGENTS.md`,
+  `docs/architecture.md`, `docs/deployment.md`, `docs/development.md`,
+  `docs/troubleshooting.md`, `docs/roadmap.md`.
+- Next agreed work: add a health endpoint and remove the host-published
+  `acestream` ports after clients migrate.
 
 The release numbers above are a snapshot, not an invariant. Check before
 relying on them:
@@ -81,9 +110,10 @@ ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.js
 | Layer | Repository | Responsibility |
 |---|---|---|
 | application | `danilaltd/ytAceProxy` (this repo) | `proxy_ace/*`, tests, Dockerfile, `pyproject.toml`/`uv.lock`, admin templates |
-| release pipeline | `.github/workflows/release.yml` | build, companion digests, manifest, Tailscale + forced-command deploy |
-| server infrastructure | `danilaltd/arch2debian` | compose, exposure matrix, data dirs, pre/post hooks, wrapper allowlist, verify |
-| server state | `/var/lib/deploy/<app>` | `manifest.json`, `manifest.prev.json`, log |
+| server shape | `danilaltd/ytAceProxy` (`deploy/compose/`) | `docker-compose.yml`, `env.required`, `ci.env` |
+| release pipeline | `.github/workflows/release.yml` | build, companion digests, manifest v2, Tailscale + forced-command deploy |
+| server infrastructure | `danilaltd/arch2debian` | `.env`, exposure matrix, data dirs, hooks, `compose.sh`, wrapper/policy, verify |
+| server state | `/var/lib/deploy/<app>` | `manifest.json`, `manifest.prev.json`, `compose.prev.yml`, log |
 
 ## Runtime shape
 
@@ -150,10 +180,10 @@ Read these before changing anything.
 3. **Schema is auto-created, not migrated.** `init_db()` runs
    `CREATE TABLE IF NOT EXISTS`. There is no migration framework. A schema
    change is a deploy-time risk; take a backup before deploying.
-4. **`redirect_channels` and `ace_channels` are the active tables.** The old
-   `ace_streaming_channels` is not created by current code; existing databases
-   may keep an empty orphan until the optional cleanup. See
-   [docs/roadmap.md](docs/roadmap.md).
+4. **`redirect_channels` and `ace_channels` are the active tables.** Current
+   code does not create `ace_streaming_channels`; the legacy table was dropped
+   on dev and prod. The post-deploy hook still accepts it during the
+   transition. See [docs/roadmap.md](docs/roadmap.md).
 5. **Unknown yt-dlp channel falls back to `placeholder`.** If neither the
    channel nor `placeholder` has a `redirect_url`, `/yt_dlp/{name}` returns
    404. Do not change this contract silently.
@@ -163,10 +193,11 @@ Read these before changing anything.
 7. **Admin UI is tailnet-only.** There is no basic auth and no production
    approval. Do not add a public bind or an auth bypass.
 8. **CI ships image digests and the compose shape.** The server compose is
-   `deploy/compose/docker-compose.yml`, embedded in manifest v2. `.env` values
-   (ports, binds, `DATA_DIR`, `ACEXY_BASE_URL`), hooks and backups remain
-   Ansible-managed. Until wrapper v2 is installed, `30_services` still renders
-   the compose from the role template; never edit `/srv` by hand.
+   `deploy/compose/docker-compose.yml`, embedded in manifest v2 with its
+   sha256 and `required_env`. `.env` values (ports, binds, `DATA_DIR`,
+   `ACEXY_BASE_URL`), hooks, `compose.sh` and backups remain Ansible-managed.
+   `30_services` never writes compose; the wrapper writes `/srv/<app>`.
+   Never edit `/srv` by hand.
 9. **Deploy references are immutable digests.** The forced command accepts
    only `ghcr.io/...@sha256:<64hex>` from the per-app allowlist. There is no
    tag fallback.
@@ -205,7 +236,9 @@ Server checks (run from the control host with access to `debian`):
 APP=ytaceproxy-dev
 ssh asus@debian "sudo jq . /var/lib/deploy/$APP/manifest.json"
 ssh asus@debian "sudo tail -n 80 /var/log/deploy/$APP.log"
-ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
+ssh asus@debian "sudo /srv/$APP/compose.sh ps"
+# full contract check
+.venv/bin/ansible-playbook playbooks/40_verify.yml
 ```
 
 ## Where to look
@@ -218,7 +251,8 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
 | real failures and fixes | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | planned tests/health and acestream exposure | [docs/roadmap.md](docs/roadmap.md) |
 | Ansible role, ports, hooks | `arch2debian/roles/ytaceproxy/README.md` |
-| manifest contract and wrapper | `arch2debian/docs/ci-cd.md` |
+| canonical ownership and manifest | `arch2debian/docs/deployment-contract.md` |
+| CI/CD and wrapper | `arch2debian/docs/ci-cd.md` |
 
 ## Changing what
 
@@ -231,12 +265,12 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
 | DB columns/tables | `proxy_ace/db.py`, `proxy_ace/repo.py`, `post-deploy.sh.j2`, backup |
 | Python dependencies | `pyproject.toml` + `uv.lock`; never edit `uv.lock` by hand |
 | base image / runtime | `Dockerfile`; keep port 80 and `/app/data` |
-| published port / bind | `arch2debian/inventory/group_vars/debian_servers/exposure.yml` |
-| compose service, volume, healthcheck, logging | `deploy/compose/docker-compose.yml` (release; until wrapper v2, also the Ansible template) |
+| published port / bind | `arch2debian/inventory/group_vars/debian_servers/exposure.yml`, then `15_firewall`/`30_services`/`31_apps` |
+| compose service, volume, healthcheck, logging | `deploy/compose/docker-compose.yml` (release) |
 | required `.env` names / compose CI fixture | `deploy/compose/env.required`, `deploy/compose/ci.env` |
-| pre/post deploy hooks | `arch2debian/roles/ytaceproxy/templates/*.j2` |
-| companion image versions | `.github/workflows/release.yml` env + Ansible role defaults |
-| manifest keys / allowlist | workflow `assert`, `arch2debian/roles/deploy/templates/deploy-app-root.j2` |
+| pre/post deploy hooks | `arch2debian/roles/ytaceproxy/templates/*.j2`, applied by `31_apps` |
+| companion image versions | `.github/workflows/release.yml` env |
+| manifest keys / allowlist | `deploy/build_manifest.py`, `arch2debian/roles/deploy/templates/deploy-app-root.j2` |
 | verify expectations | `arch2debian/roles/verify/defaults/main.yml` |
 
 ## Documentation rules
@@ -249,7 +283,7 @@ ssh asus@debian "sudo docker compose -p $APP -f /srv/$APP/docker-compose.yml ps"
   snapshot — not feature tutorials.
 - Record invariants, ordering constraints and “do not touch” rules; skip code
   walkthroughs that can be read in a minute.
-- A contract change (endpoint, env var, table, manifest key, port, CI
+- A contract change (endpoint, env var, table, manifest key, compose, port, CI
   behaviour) updates the document that states it in the same commit.
 - Planned work goes to [docs/roadmap.md](docs/roadmap.md); completed work
   removes the stale roadmap item.

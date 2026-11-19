@@ -128,8 +128,9 @@ ace_channels (
 
 `redirect_channels` is the yt-dlp table. `ace_channels` stores the AceStream
 content id/hash used by `/ace/{name}`. The old `ace_streaming_channels` table
-is no longer created; existing databases may keep an empty orphan until the
-optional cleanup in [roadmap.md](roadmap.md).
+is no longer created and was dropped on dev and prod (prod backup:
+`/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db`). The post-deploy hook
+still accepts it during the transition; see [roadmap.md](roadmap.md).
 
 There are **no migrations**. `init_db()` only creates missing tables. Adding
 `ace_channels` is additive and works on an existing database. If a column
@@ -162,7 +163,12 @@ port. The manager container names follow `ytaceproxy-<env>-manager-1`.
 
 The manager image is built from this repository. The `acestream` and `acexy`
 images are pinned in `.github/workflows/release.yml` and resolved to digests by
-the `companions` job; they are not built here.
+the `companions` job; they are not built here. The server compose shape lives
+in `deploy/compose/docker-compose.yml` and is embedded in release manifest v2
+with its sha256 and `required_env`. Ansible owns `.env`, hooks and `compose.sh`;
+the wrapper writes `/srv/<app>/docker-compose.yml` and `deploy-images.env`.
+`30_services` never writes application compose and never starts application
+containers.
 
 ## Lifecycle and failure behaviour
 
@@ -175,11 +181,14 @@ the `companions` job; they are not built here.
   `ace_channels` when required by the role, and the redirect count. A failure
   makes the deploy wrapper roll the **image** back to `manifest.prev.json`;
   the database is not rolled back automatically.
-- `30_services` reads `/var/lib/deploy/<app>/manifest.json`, writes
-  `/srv/<app>/deploy-images.env` and passes it to compose. Without a manifest
-  it uses the bootstrap tag from `ytaceproxy_environments`.
+- `31_apps -e env=dev|prod` writes `.env`, hooks and `compose.sh`; it never
+  writes compose and never starts containers. The wrapper writes
+  `/srv/<app>/docker-compose.yml` and `deploy-images.env` from the v2 manifest
+  and validates the resolved compose before applying it.
+- A stack without a manifest has no deployed compose; the first release creates
+  it. `.env` carries host values only, never image references.
 - Every service uses the `json-file` log driver with `max-size=10m` and
-  `max-file=3`.
+  `max-file=3`; the wrapper policy enforces it.
 
 ## ACE redirect
 
@@ -187,6 +196,8 @@ the `companions` job; they are not built here.
 video-streaming implementation is gone; the current route only redirects to
 `acexy`. Content ids live in `ace_channels`, not in `redirect_channels`.
 
-The optional cleanup of the legacy `ace_streaming_channels` table and the
-optional removal of the host-published `acestream` port are tracked in
+The legacy `ace_streaming_channels` table was dropped on dev and prod (prod
+backup: `/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db`). The
+post-deploy hook still accepts either table during the transition. The removal
+of the host-published `acestream` port is tracked in
 [roadmap.md](roadmap.md).

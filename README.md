@@ -19,12 +19,16 @@ manifest.
 
 ## Current state
 
-Snapshot (2026-11-17): `ytaceproxy-dev` release `dev-10` has the uv migration,
-the ACE cleanup and the `/ace` → acexy redirect. `ytaceproxy-prod` remains on
-`prod-8` and the change is not merged to `main`. Release numbers are a
-snapshot, not an invariant — check `/var/lib/deploy/<app>/manifest.json` or the
-latest `Release` run. Session start, Git rules and live-state commands are in
-[AGENTS.md](AGENTS.md).
+Snapshot (2026-11-19): `ytaceproxy-dev` is `dev-11` and `ytaceproxy-prod` is
+`prod-12`. Both run manifest v2 and compose
+`sha256 c5d9ed96…`; `ace_channels` exists on both, the legacy
+`ace_streaming_channels` was dropped on prod after a backup, and `/ace`
+redirects through acexy on both. The post-deploy hook still accepts either
+table during the transition. Release numbers are a snapshot, not an invariant
+— check `/var/lib/deploy/<app>/manifest.json` or the latest `Release` run.
+Session start, Git rules and live-state commands are in
+[AGENTS.md](AGENTS.md); ownership is in
+`arch2debian/docs/deployment-contract.md`.
 
 ## Endpoints
 
@@ -74,8 +78,10 @@ startup from `proxy_ace/db.py`.
 | `created_at` | creation timestamp |
 
 A fresh database contains only these two tables. The old
-`ace_streaming_channels` table is no longer created; existing databases may
-keep an empty orphan until the optional cleanup in
+`ace_streaming_channels` table is no longer created and was dropped on dev and
+prod (prod backup:
+`/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db`). The post-deploy hook
+still accepts it during the transition; see
 [docs/roadmap.md](docs/roadmap.md).
 
 ## Run locally
@@ -117,20 +123,23 @@ docker run --rm \
 The published image is `ghcr.io/danilaltd/ytaceproxy-proxy`. The root
 `docker-compose.yml` is a **local development stack only** (`manager`,
 `acestream`, `acexy`, host ports 8088/6878/8090). The server stack shape is
-`deploy/compose/docker-compose.yml`; the release embeds it in the manifest.
-Until wrapper v2 is installed, `30_services` still renders `/srv/...` from the
-Ansible template and a push to `dev` would be rejected.
+`deploy/compose/docker-compose.yml`; the release embeds it in manifest v2 with
+its sha256 and `required_env`. Ansible writes `.env`, hooks and `compose.sh`;
+the wrapper writes `/srv/<app>/docker-compose.yml` and `deploy-images.env`.
 
 ## Deploy
 
 - `dev` push → image built and deployed as `ytaceproxy-dev` (`dev-<run>`).
 - `main` push → image built and deployed as `ytaceproxy-prod` (`prod-<run>`).
 - The workflow builds on GitHub-hosted runners, resolves companion digests,
-  validates the server compose with `deploy/compose/ci.env`, builds manifest v2
+  validates the server compose with `deploy/compose/ci.env`, calls
+  `deploy/build_manifest.py` to build manifest v2
   (`app`, `config`, `images`, `release`), joins the tailnet and calls the
   forced-command `deploy-app <app> <release> <base64url>` over SSH.
 - Ansible owns `.env` values (ports, binds, `DATA_DIR`, `ACEXY_BASE_URL`),
-  hooks and backups; the release owns the compose shape and image digests.
+  hooks, `compose.sh` and backups; the release owns the compose shape, its
+  hash and the image digests.
+- A compose-only change is a release with the same digests and a new hash.
 - Admin UI is tailnet-only; there is no basic auth and no production approval.
 
 The full flow, command reference and "what to change when" table are in

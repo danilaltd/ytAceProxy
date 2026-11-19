@@ -73,7 +73,8 @@ for an existing one on the next startup. A new column does not.
 1. Change `CREATE_TABLES_SQL` in `proxy_ace/db.py`.
 2. Update `proxy_ace/repo.py` and the model.
 3. If the post-deploy hook must check the new table, update
-   `arch2debian/roles/ytaceproxy/templates/post-deploy.sh.j2`.
+   `arch2debian/roles/ytaceproxy/templates/post-deploy.sh.j2` and apply it
+   with `31_apps -e env=dev|prod`.
 4. Take a pre-deploy backup and test on `dev` first.
 5. If the change cannot be additive, write the one-off migration for the
    existing database and document it in `docs/deployment.md`.
@@ -83,8 +84,8 @@ Use the pre-deploy backup or a one-shot `docker exec` with `sqlite3`, and keep
 the result in the deployment log.
 
 `ace_channels` was added additively. The old `ace_streaming_channels` is no
-longer created; an existing database may keep an empty orphan until the
-optional cleanup in [roadmap.md](roadmap.md).
+longer created and was dropped on dev and prod. The post-deploy hook still
+accepts it during the transition; see [roadmap.md](roadmap.md).
 
 ## Resolver notes
 
