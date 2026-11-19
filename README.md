@@ -37,6 +37,7 @@ Session start, Git rules and live-state commands are in
 | GET | `/yt_dlp/{channel}` | 302 to the stored `redirect_url`; falls back to the `placeholder` redirect; otherwise 404 |
 | GET | `/yt_dlp/{channel}/upd` | re-resolves one channel now; returns `200 text/plain` |
 | GET | `/ace/{channel}` | 302 to `<ACEXY_BASE_URL>/ace/getstream?id=<content_id>`; unknown channel is 404; missing `ACEXY_BASE_URL` is 503 |
+| GET | `/health` | 200 `ok` when SQLite and `redirect_channels` are readable; 503 otherwise; used by the manager healthcheck |
 | GET | `/admin/redirects` | admin list of yt-dlp redirects: add, edit, delete, sync |
 | GET/POST | `/admin/redirects/add` | create a redirect |
 | GET/POST | `/admin/redirects/edit/{id}` | edit a redirect |
@@ -147,7 +148,7 @@ The full flow, command reference and "what to change when" table are in
 
 ## Planned changes
 
-1. Add a small `/health` endpoint and structured logging improvements.
+1. Add structured logging improvements (the `/health` endpoint is done).
 2. Remove the host-published `acestream` ports after all clients use `/ace`
    through `acexy`.
 3. Revisit memory limits after a week of `docker stats` data.

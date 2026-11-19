@@ -177,13 +177,28 @@ ssh asus@debian "sudo tail -n 120 /var/log/deploy/ytaceproxy-dev.log"
 ```
 
 The post-deploy hook checks `PRAGMA integrity_check`, `redirect_channels` and
-at least one ACE table (`ace_channels` or the legacy
-`ace_streaming_channels` during the transition), plus the redirect count. A
-failed check means the new image cannot use the current database. The image and
-compose are rolled back; the database is **not**. Restore the last `pre-*.db`
-backup if the schema is incompatible.
+The post-deploy hook checks `PRAGMA integrity_check`, the required tables
+(`redirect_channels` and `ace_channels`) and the redirect count. A failed check
+means the new image cannot use the current database. The image and compose are
+rolled back; the database is **not**. Restore the last `pre-*.db` backup if the
+schema is incompatible.
 
 ## Application
+
+### `/health` returns 503
+
+The manager serves, but SQLite is unreadable (wrong bind mount, a corrupt
+database or a missing `redirect_channels` table). The container healthcheck
+fails and `docker compose up -d --wait` blocks, so a deploy in this state
+rolls back. Check:
+
+```bash
+ssh asus@debian "sudo /srv/ytaceproxy-dev/compose.sh ps"
+ssh asus@debian "sudo docker inspect -f '{{json .State.Health}}' ytaceproxy-dev-manager-1"
+curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:8089/health
+```
+
+Fix the volume or restore the pre-deploy backup; do not edit `/srv` by hand.
 
 ### `/yt_dlp/<name>` returns 404
 

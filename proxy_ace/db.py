@@ -20,7 +20,15 @@ CREATE TABLE IF NOT EXISTS ace_channels (
 );
 """
 
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(CREATE_TABLES_SQL)
         await db.commit()
+
+
+async def check_db() -> None:
+    """Raise if the SQLite database or the active table is unreadable."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT count(*) FROM redirect_channels")
+        await cursor.fetchone()

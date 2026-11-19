@@ -71,6 +71,15 @@ the Docker DNS name `acexy` is not.
 `/ace` names are a separate namespace from `/yt_dlp` names. A name can have a
 yt-dlp redirect and an ACE content id at the same time.
 
+### `GET /health`
+
+`handler.health_handler` runs `db.check_db()`: one SQLite read of
+`redirect_channels`. A readable database returns `200 ok`; any error returns
+`503 unhealthy` and is logged without credentials. The manager healthcheck in
+`deploy/compose/docker-compose.yml` calls this endpoint instead of a bare TCP
+connect, so `docker compose up -d --wait` proves that the web app and the
+database both work.
+
 ### Admin UI
 
 `admin_routes.py` exposes two lists:
@@ -172,8 +181,9 @@ containers.
 
 ## Lifecycle and failure behaviour
 
-- `docker compose up -d --wait` waits for the manager healthcheck (TCP port
-  80) and for running containers.
+- `docker compose up -d --wait` waits for the manager healthcheck (an HTTP
+  `GET /health` inside the container: the web app answers and SQLite is
+  readable) and for running containers.
 - `pre-deploy.sh` creates a consistent SQLite backup before the image switch.
   It skips the backup only when the manager is not running or `proxies.db`
   does not exist yet.

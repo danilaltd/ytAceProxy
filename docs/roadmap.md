@@ -13,7 +13,12 @@ Done:
 - dropped the empty `ace_streaming_channels` table on dev and on prod. The prod
   backup is `/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db`;
 - moved the server compose into `deploy/compose/` and switched both stacks to
-  manifest v2 and wrapper v2.
+  manifest v2 and wrapper v2;
+- added `/health` with a SQLite read check and switched the manager healthcheck
+  from a TCP connect to it;
+- tightened the post-deploy hook to require `redirect_channels` and
+  `ace_channels` (applied with `31_apps` on dev and prod after `prod-12` proved
+  the new table on both stacks).
 
 Remaining work:
 
@@ -34,32 +39,21 @@ use `/ace` through `acexy`:
 
 Until then, direct access remains possible and bypasses acexy's multiplexing.
 
-## 2. Health endpoint and structured logging
+## 2. Structured logging
 
-- Add `/health` that checks SQLite read access; use it in the manager
-  healthcheck if it is more useful than the TCP connect.
-- Add structured logging with request/channel fields, without logging resolved
-  URLs that contain credentials or ACE content ids.
+Add structured logging with request/channel fields, without logging resolved
+URLs that contain credentials or ACE content ids.
 
-## 3. Tighten the post-deploy hook
-
-The hook currently accepts `ace_channels` **or** the legacy
-`ace_streaming_channels` during the transition. After the next prod release
-proves `ace_channels` on both stacks, require only `ace_channels` in
-`arch2debian/roles/ytaceproxy/templates/post-deploy.sh.j2` and apply it with
-`31_apps`.
-
-## 4. Memory limits
+## 3. Memory limits
 
 Revisit memory limits after a week of `docker stats` data. Current usage is far
 below the host limit, so this is not urgent.
 
 ## Order
 
-1. Health endpoint + logging.
+1. Structured logging.
 2. Acestream port removal (after clients migrate).
-3. Tighten the post-deploy table check.
-4. Memory limits.
+3. Memory limits.
 
 Each application change follows the same release path: `dev` → verify → `main`
 → verify, with a pre-deploy SQLite backup and a green `40_verify`. Compose

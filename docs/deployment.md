@@ -290,6 +290,7 @@ ssh asus@debian "sudo /srv/$APP/compose.sh ps"
 ssh asus@debian "sudo docker inspect -f '{{.Config.Image}}' $APP-manager-1"
 
 # 4. UI and test redirects
+curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/health
 curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/redirects
 curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/ace
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
@@ -308,9 +309,10 @@ cd arch2debian
 The acceptance criteria are: the manifest has exactly `manager`, `acestream`,
 `acexy` and the three `config` keys; the compose file hash equals
 `config.compose_sha256`; `required_env` is present in `.env`; the policy
-passes; the manager is healthy; both admin pages answer; a known `/yt_dlp`
-redirect is 302; a known `/ace` channel is 302 to the environment's acexy port;
-a pre-deploy backup exists; running images equal the manifest digests.
+passes; the manager is healthy; `/health` answers 200; both admin pages answer;
+a known `/yt_dlp` redirect is 302; a known `/ace` channel is 302 to the
+environment's acexy port; a pre-deploy backup exists; running images equal the
+manifest digests.
 
 ## 7. Rollback
 
@@ -350,7 +352,8 @@ be dropped again.
 
 - `30_services` never starts application stacks; `31_apps` writes the
   environment; the release starts the stack.
-- The manager healthcheck is a TCP connect to port 80 inside the container.
+- The manager healthcheck is an HTTP `GET /health` inside the container: it
+  proves the web app answers and SQLite is readable.
 - `ACEXY_BASE_URL` comes from `.env` (tailnet IP + per-environment acexy port).
   Re-run `31_apps` after a Tailscale address or port change.
 - Logs are capped per container (`json-file`, 10 MB × 3).

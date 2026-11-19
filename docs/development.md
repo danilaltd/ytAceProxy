@@ -5,7 +5,7 @@
 | Path | Purpose |
 |---|---|
 | `proxy_ace/app.py` | `aiohttp` application, routes, startup/shutdown |
-| `proxy_ace/handler.py` | `/yt_dlp`, `/ace` handlers and redirect response |
+| `proxy_ace/handler.py` | `/yt_dlp`, `/ace`, `/health` handlers and redirect response |
 | `proxy_ace/admin_routes.py` | admin list/add/edit/delete/sync routes |
 | `proxy_ace/config.py` | `yt-dlp` resolution, sync logic, TTL parsing |
 | `proxy_ace/ace.py` | acexy URL construction from `ACEXY_BASE_URL` |
@@ -113,6 +113,8 @@ uv run pytest
   and invalid or missing `ACEXY_BASE_URL`.
 - `tests/test_ace_handler.py` uses a temporary SQLite file and the aiohttp test
   client to cover 302, 404 and 503, plus the fresh-database table set.
+- `tests/test_health.py` covers the 200/503 health responses with and without
+  a readable database.
 
 Do not hit a real streaming site in tests. When adding a test for the resolver,
 use a fake resolver or a pure function.
