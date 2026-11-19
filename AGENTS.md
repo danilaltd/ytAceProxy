@@ -57,17 +57,19 @@ Canonical contract: `arch2debian/docs/deployment-contract.md`.
 
 ## Current state (snapshot: 2026-11-19)
 
-- Both stacks are healthy: `ytaceproxy-prod` release `prod-12` and
-  `ytaceproxy-dev` release `dev-11`, both compose `sha256 c5d9ed96…`.
+- Both stacks are healthy: `ytaceproxy-prod` release `prod-14` and
+  `ytaceproxy-dev` release `dev-13`, both compose `sha256 8d422c1c…`.
 - Both stacks run manifest v2 and wrapper v2. `ace_channels` exists on dev and
   prod; the legacy `ace_streaming_channels` was dropped on prod after the
   backup `/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db` (dev was
   cleaned earlier).
 - `ACEXY_BASE_URL` is present on dev and prod; the prod post-deploy check
   reports `redirects=2`.
-- The post-deploy hook still accepts `ace_channels` **or** the legacy
-  `ace_streaming_channels` during the transition. Tighten it after the next
-  prod release proves the new table on both stacks.
+- `/health` answers 200 on both stacks and the manager healthcheck uses it
+  instead of a bare TCP connect.
+- The post-deploy hook requires `redirect_channels` and `ace_channels`; the
+  transition that also accepted `ace_streaming_channels` is closed (applied
+  with `31_apps` on dev and prod).
 - `verify_apps: true`; the last `40_verify` passed.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
@@ -79,7 +81,7 @@ Canonical contract: `arch2debian/docs/deployment-contract.md`.
 - Application documentation is complete: `README.md`, `AGENTS.md`,
   `docs/architecture.md`, `docs/deployment.md`, `docs/development.md`,
   `docs/troubleshooting.md`, `docs/roadmap.md`.
-- Next agreed work: add a health endpoint and remove the host-published
+- Next agreed work: structured logging and removing the host-published
   `acestream` ports after clients migrate.
 
 The release numbers above are a snapshot, not an invariant. Check before

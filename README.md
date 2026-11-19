@@ -19,12 +19,13 @@ manifest.
 
 ## Current state
 
-Snapshot (2026-11-19): `ytaceproxy-dev` is `dev-11` and `ytaceproxy-prod` is
-`prod-12`. Both run manifest v2 and compose
-`sha256 c5d9ed96…`; `ace_channels` exists on both, the legacy
+Snapshot (2026-11-19): `ytaceproxy-dev` is `dev-13` and `ytaceproxy-prod` is
+`prod-14`. Both run manifest v2 and compose
+`sha256 8d422c1c…`; `ace_channels` exists on both, the legacy
 `ace_streaming_channels` was dropped on prod after a backup, and `/ace`
-redirects through acexy on both. The post-deploy hook still accepts either
-table during the transition. Release numbers are a snapshot, not an invariant
+redirects through acexy on both. `/health` answers 200 on both stacks and the
+manager healthcheck uses it; the post-deploy hook requires the active tables.
+Release numbers are a snapshot, not an invariant
 — check `/var/lib/deploy/<app>/manifest.json` or the latest `Release` run.
 Session start, Git rules and live-state commands are in
 [AGENTS.md](AGENTS.md); ownership is in

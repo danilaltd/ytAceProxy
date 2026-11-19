@@ -60,8 +60,8 @@ never starts application containers; `31_apps` never writes compose.
 | manifest/log | `/var/lib/deploy/<app>`, `/var/log/deploy/<app>.log` | same pattern |
 
 The two stacks share no database, cache, port or manifest and can run at the
-same time. Current releases are `prod-12` and `dev-11`, both compose
-`sha256 c5d9ed96…`; the live value is in each manifest.
+same time. Current releases are `prod-14` and `dev-13`, both compose
+`sha256 8d422c1c…`; the live value is in each manifest.
 
 ## 3. Release flow
 
