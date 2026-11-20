@@ -63,14 +63,14 @@ Canonical contract: `arch2debian/docs/deployment-contract.md`.
 
 ## Current state (snapshot: 2026-11-20)
 
-- Both stacks are healthy: `ytaceproxy-prod` release `prod-20` and
-  `ytaceproxy-dev` release `dev-19`, both compose `sha256 3dc0d3fd…`.
+- Both stacks are healthy: `ytaceproxy-prod` release `prod-22` and
+  `ytaceproxy-dev` release `dev-21`, both compose `sha256 3dc0d3fd…`.
 - The single-table `/play` model is deployed on both stacks; prod has 3
   channels, dev has 0. The old `proxies.db` was removed on both.
 - On 2026-11-20 a resolver unpack bug (worker returned 2 values, caller
   expected 3) briefly broke new channels and refreshes; fixed in `dev-19` /
-  `prod-20`, covered by `tests/test_resolver.py`. The release workflow now has
-  a `test` job that gates the build.
+  `prod-20`, covered by `tests/test_resolver.py`. The `test` job added in
+  `dev-21` / `prod-22` now gates the build.
 - `/ace`, `ace_channels`, `ACEXY_BASE_URL` and the ACE admin pages are removed.
   The `acestream`/`acexy` containers still deploy but nothing in the app uses
   them; their fate is a deferred roadmap decision.
