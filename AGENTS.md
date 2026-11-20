@@ -67,6 +67,10 @@ Canonical contract: `arch2debian/docs/deployment-contract.md`.
   `ytaceproxy-dev` release `dev-19`, both compose `sha256 3dc0d3fd…`.
 - The single-table `/play` model is deployed on both stacks; prod has 3
   channels, dev has 0. The old `proxies.db` was removed on both.
+- On 2026-11-20 a resolver unpack bug (worker returned 2 values, caller
+  expected 3) briefly broke new channels and refreshes; fixed in `dev-19` /
+  `prod-20`, covered by `tests/test_resolver.py`. The release workflow now has
+  a `test` job that gates the build.
 - `/ace`, `ace_channels`, `ACEXY_BASE_URL` and the ACE admin pages are removed.
   The `acestream`/`acexy` containers still deploy but nothing in the app uses
   them; their fate is a deferred roadmap decision.
@@ -110,7 +114,7 @@ ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.js
 |---|---|---|
 | application | `danilaltd/ytAceProxy` (this repo) | `playgate/*`, tests, Dockerfile, `pyproject.toml`/`uv.lock`, admin templates |
 | server shape | `danilaltd/ytAceProxy` (`deploy/compose/`) | `docker-compose.yml`, `env.required`, `ci.env` |
-| release pipeline | `.github/workflows/release.yml` | build, companion digests, manifest v2, Tailscale + forced-command deploy |
+| release pipeline | `.github/workflows/release.yml` | test gate, build, companion digests, manifest v2, Tailscale + forced-command deploy |
 | server infrastructure | `danilaltd/arch2debian` | `.env`, exposure matrix, data dirs, hooks, `compose.sh`, wrapper/policy, verify |
 | server state | `/var/lib/deploy/<app>` | `manifest.json`, `manifest.prev.json`, `compose.prev.yml`, log |
 
@@ -152,6 +156,9 @@ Rules:
 - **Never commit a code, dependency, Dockerfile or workflow change directly to
   `main`.** Push `dev`, wait for the dev deploy, verify it, then fast-forward
   `main`.
+- **Run `uv run pytest` before every push.** The release workflow's `test` job
+  gates the build and deploy; a resolver/DB/route/form change needs a test.
+  Do not validate a resolver change only with a redirect override.
 - Documentation-only changes (`README.md`, `AGENTS.md`, `docs/**`) are skipped
   by the release workflow. Still keep `dev` and `main` identical: commit on
   `dev`, then fast-forward `main`.
@@ -182,7 +189,8 @@ Read these before changing anything.
    change this contract silently.
 6. **URL resolution is out-of-process.** `yt-dlp` runs in a separate process
    with a 60-second timeout and a concurrency limit of 2. Never call
-   `yt-dlp` inline in the event loop.
+   `yt-dlp` inline in the event loop. `run_in_process_with_timeout()` returns
+   `(url, format, link)`; keep `tests/test_resolver.py` green.
 7. **Per-channel quality uses `channels.format`.** Dedup is by
    `(source URL, format)`. Merge selectors (`+`) are rejected: the image has no
    ffmpeg.

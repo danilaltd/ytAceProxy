@@ -18,7 +18,10 @@ Done:
 - added `/health` and switched the manager healthcheck to it;
 - tightened the post-deploy hook to require `channels`;
 - moved the server compose into `deploy/compose/` and switched both stacks to
-  manifest v2 and wrapper v2.
+  manifest v2 and wrapper v2;
+- added a CI `test` job (`uv sync --frozen` + `uv run pytest`) that gates the
+  build, and resolver/schema/form regression tests after the 2026-11-20
+  incident.
 
 Remaining work:
 

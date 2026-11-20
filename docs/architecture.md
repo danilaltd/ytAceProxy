@@ -88,6 +88,9 @@ bound to the Tailscale IP. Do not expose it on the LAN or the internet.
 - `resolve_channels()` uses a semaphore of 2 (`MAX_PROCESSES`) and
   deduplicates by `(source URL, format)`, so two channels with the same URL and
   different quality resolve independently.
+- `run_in_process_with_timeout()` returns `(url, format, link)`;
+  `resolve_channels()` and the worker must keep that triple in sync (covered by
+  `tests/test_resolver.py`).
 - A channel whose `ttl` is `-1` or in the future is skipped unless the caller
   forces an update. A successful resolution extracts an expiry from the URL
   (`expire=`, `validto=`, or similar) and stores it in `ttl`.

@@ -30,6 +30,16 @@ async def test_unknown_channel_falls_back_to_placeholder(aiohttp_client, app):
     assert response.headers["Location"] == "http://fallback"
 
 
+async def test_expired_ttl_still_returns_the_stored_redirect(aiohttp_client, app):
+    await repo.add_channel("nsf", "http://source", "http://old", 1, None)
+    client = await aiohttp_client(app)
+
+    response = await client.get("/play/nsf", allow_redirects=False)
+
+    assert response.status == 302
+    assert response.headers["Location"] == "http://old"
+
+
 async def test_update_endpoint_calls_resolver(aiohttp_client, app, monkeypatch):
     calls = []
 

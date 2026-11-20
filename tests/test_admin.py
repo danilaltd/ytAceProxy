@@ -1,3 +1,5 @@
+import asyncio
+
 import playgate.admin_routes as admin_routes
 import playgate.repo as repo
 
@@ -43,6 +45,32 @@ async def test_add_channel_stores_format_and_redirects(aiohttp_client, app):
     channels = await repo.get_channels()
     assert len(channels) == 1
     assert channels[0].format == "best"
+
+
+async def test_add_channel_starts_background_resolve(aiohttp_client, app, monkeypatch):
+    calls = []
+
+    async def fake_update(name, context=None):
+        calls.append(name)
+
+    monkeypatch.setattr(admin_routes, "update_special_channel", fake_update)
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        "/admin/channels/add",
+        data={
+            "name": "nsf",
+            "url": "http://source",
+            "format": "",
+            "format_custom": "",
+            "redirect_url": "",
+        },
+        allow_redirects=False,
+    )
+    await asyncio.sleep(0)
+
+    assert response.status == 302
+    assert calls == ["nsf"]
 
 
 async def test_add_channel_uses_custom_format(aiohttp_client, app):

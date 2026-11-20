@@ -217,19 +217,37 @@ PY"
 
 Add or fix the channel at `/admin/channels`, or add a `placeholder` row.
 
-### A new channel stays at 404 / the admin shows no redirect
+### 2026-11-20: a new channel stayed at 404 after the single-table rollout
 
-`redirect_url` is written only after a successful resolve. Check the manager
-logs:
+Symptom: `/play/qq` returned 404, and `nsf` kept an expired link even after
+“Update now”. The admin showed no redirect for `qq`.
+
+Cause: the resolver refactor changed `run_in_process_with_timeout()` to return
+`(url, link)` while `resolve_channels()` unpacked `(url, format, link)`. Every
+successful resolve raised `ValueError: not enough values to unpack`, so the
+redirect and TTL were never written. Failed resolves were handled; successful
+ones crashed. The manager log showed `Task exception was never retrieved`.
+
+Why it shipped: the unit tests stubbed background resolution and never
+exercised the real worker contract; the smoke test used a redirect override,
+which bypasses the resolver; CI did not run tests at all.
+
+Fix: the worker returns `(url, format, link)`; `tests/test_resolver.py` covers
+the worker contract, persistence through `update_special_channel()` and
+`sync_channels()`, dedup, skips and failures. The release workflow now has a
+`test` job that gates the build.
+
+Prevention: any resolver/DB/route change needs a test; do not validate only
+with a redirect override; keep `uv run pytest` green before pushing.
+
+For a channel that stays unresolved, check the logs:
 
 ```bash
 ssh asus@debian "sudo docker logs --tail 100 ytaceproxy-prod-manager-1 2>&1 | grep -Ei 'resolve|Traceback' | tail"
 ```
 
 A failed `yt-dlp` resolve leaves `redirect_url` empty; fix the source URL or
-quality and press “Update now”. The first single-table build had a resolver
-unpack bug that broke even successful resolves; it is fixed in `dev-19` /
-`prod-20` (tests in `tests/test_resolver.py`).
+quality and press “Update now”.
 
 ### `/play/<name>` returns 302 but the link is expired
 

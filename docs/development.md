@@ -114,16 +114,32 @@ Tests use `pytest` + `pytest-aiohttp` and do not need the network:
 uv run pytest
 ```
 
+**Testing is mandatory:** `uv run pytest` must pass before every push, and the
+release workflow's `test` job gates the build and deploy. A change to the
+resolver, database, routes, forms or admin must add or update a test. Do not
+validate a resolver change only with a redirect override — that bypasses
+resolution.
+
 - `tests/conftest.py` provides a temporary `channels.db` and an `app` fixture;
-  an autouse fixture stubs background resolution.
-- `tests/test_play.py` covers 302, 404, `placeholder` fallback and the
-  `upd` endpoint.
+  an autouse fixture stubs background resolution for admin tests.
+- `tests/test_resolver.py` covers the worker contract
+  `(url, format, link)`, persistence through
+  `update_special_channel()`/`sync_channels()`, dedup by `(url, format)`,
+  valid-TTL skips, forced updates and failures.
+- `tests/test_db.py` covers the fresh schema and the health read.
+- `tests/test_forms.py` covers format mapping, merge-format rejection and
+  name validation. Validation tests use a minimal form-data object because
+  `Optional()` relies on `raw_data`.
+- `tests/test_play.py` covers 302, 404, `placeholder` fallback, expired TTL
+  and the `upd` endpoint.
 - `tests/test_admin.py` covers list/add/edit/delete/update/sync, duplicate
-  names, URL-separator rejection and merge-format rejection.
+  names, URL-separator and merge-format rejection, and background resolve
+  scheduling.
 - `tests/test_ttl.py` covers eternal/valid/expired/unknown and humanisation.
 - `tests/test_health.py` covers the 200/503 health responses.
 
-Do not hit a real streaming site in tests.
+Do not hit a real streaming site in tests. The resolver worker test uses the
+`fork` start method (Linux) and is skipped elsewhere.
 
 ## Dependency management (uv)
 
