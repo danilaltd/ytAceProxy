@@ -78,8 +78,12 @@ Dependency management is `uv` (`pyproject.toml` + `uv.lock`):
 ```bash
 uv sync --frozen
 uv run python -m playgate.app
-uv run pytest
+uv run pytest --cov=playgate
+uv run pre-commit run --all-files
 ```
+
+Quality gates: ruff (lint+format), ty, deptry, pytest with an 80% coverage
+gate, and pre-commit hooks; CI runs the same checks before building.
 
 The app listens on port **80** (`LISTEN_PORT` in `playgate/app.py`), so either
 run with the needed privileges or temporarily change `LISTEN_PORT` on a local

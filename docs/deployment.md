@@ -69,7 +69,8 @@ A push to `dev` or `main` triggers `.github/workflows/release.yml`.
 ```text
 push to dev/main
   └─ security-scan (Gitleaks, full history)
-  └─ test (uv sync --frozen + uv run pytest; gates the build)
+  └─ test (uv sync --frozen + pytest with 80% coverage; gates the build)
+  └─ lint (pre-commit: ruff/ty/deptry/hygiene + actionlint; gates the build)
   └─ build (GitHub-hosted runner)
        └─ docker compose config -q (deploy/compose, ci.env)
        └─ docker build, push ghcr.io/danilaltd/ytaceproxy-proxy:<env>-<run>
@@ -102,8 +103,9 @@ Details:
 
 - `main` → `ytaceproxy-prod` / `prod-*`; `dev` → `ytaceproxy-dev` / `dev-*`.
 - No production approval; a merge to `main` deploys immediately.
-- The `test` job runs `uv sync --frozen` and `uv run pytest -q`; a red test
-  blocks the build and deploy.
+- The `test` job runs `uv sync --frozen` and `uv run pytest -q
+  --cov=playgate` (80% gate); the `lint` job runs `pre-commit run --all-files`
+  (ruff, ty, deptry, hygiene) and actionlint. Both gate the build and deploy.
 - The deploy job has no shell on the server beyond the forced command.
 - Images are always `ghcr.io/...@sha256:<64 lowercase hex>`; a tag is never
   sent to the server.

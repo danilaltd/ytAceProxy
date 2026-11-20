@@ -21,7 +21,10 @@ Done:
   manifest v2 and wrapper v2;
 - added a CI `test` job (`uv sync --frozen` + `uv run pytest`) that gates the
   build, and resolver/schema/form regression tests after the 2026-11-20
-  incident.
+  incident;
+- added strict tooling: ruff lint/format, ty, deptry, pre-commit hooks
+  (pre-commit + pre-push), coverage gate, actionlint, and a CI `lint` job that
+  gates the build.
 
 Remaining work:
 

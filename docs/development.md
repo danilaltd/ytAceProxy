@@ -141,6 +141,34 @@ resolution.
 Do not hit a real streaming site in tests. The resolver worker test uses the
 `fork` start method (Linux) and is skipped elsewhere.
 
+## Tooling
+
+The dev group in `pyproject.toml` pins `ruff`, `ty`, `deptry`, `pre-commit`
+and `pytest-cov`. Configuration lives in `pyproject.toml`.
+
+```bash
+uv run ruff check .              # lint
+uv run ruff format .             # format
+uv run ty check --exclude test.py  # type check (test.py is a scratch probe)
+uv run deptry .                  # unused/missing/transitive dependencies
+uv run pytest --cov=playgate     # tests + coverage gate (80%)
+uv run pre-commit run --all-files
+uv run pre-commit install        # installs pre-commit + pre-push hooks
+```
+
+- Ruff selects `E,F,W,I,UP,B,SIM,C4,PIE,RUF,PT,S`; `S101` is ignored in
+  `tests/` (pytest uses asserts).
+- `ty` is checked with explicit paths; `test.py` is excluded because it is a
+  manual probe, not part of the package or tests. The one `ty: ignore` in
+  `playgate/admin_routes.py` is for a WTForms stub that types `Field.errors`
+  as an empty tuple while it is a list at runtime.
+- `deptry` treats `playgate` as first-party and ignores the tool-only dev
+  dependencies and the `pytest-aiohttp` plugin.
+- Pre-commit runs hygiene hooks, ruff/ruff-format, ty and deptry on commit;
+  pytest runs on pre-push.
+- CI has separate `lint` (pre-commit + actionlint) and `test` (pytest with
+  coverage) jobs; a red check blocks the build and deploy.
+
 ## Dependency management (uv)
 
 `pyproject.toml` is the source of dependencies; `uv.lock` is committed. The

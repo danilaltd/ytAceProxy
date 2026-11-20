@@ -52,10 +52,28 @@ jobs:
       - name: Run tests
         run: |
           uv sync --frozen
-          uv run pytest -q
+          uv run pytest -q --cov=playgate --cov-report=term-missing
+
+  lint:
+    needs: [security-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        run: pip install --disable-pip-version-check uv==0.13.5
+      - name: Run pre-commit
+        run: |
+          uv sync --frozen
+          uv run pre-commit run --all-files --show-diff-on-failure
+      - name: Lint GitHub Actions workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7
 
   build:
-    needs: [security-scan, test]
+    needs: [security-scan, test, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

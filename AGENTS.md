@@ -114,7 +114,7 @@ ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.js
 |---|---|---|
 | application | `danilaltd/ytAceProxy` (this repo) | `playgate/*`, tests, Dockerfile, `pyproject.toml`/`uv.lock`, admin templates |
 | server shape | `danilaltd/ytAceProxy` (`deploy/compose/`) | `docker-compose.yml`, `env.required`, `ci.env` |
-| release pipeline | `.github/workflows/release.yml` | test gate, build, companion digests, manifest v2, Tailscale + forced-command deploy |
+| release pipeline | `.github/workflows/release.yml` | test/lint gates, build, companion digests, manifest v2, Tailscale + forced-command deploy |
 | server infrastructure | `danilaltd/arch2debian` | `.env`, exposure matrix, data dirs, hooks, `compose.sh`, wrapper/policy, verify |
 | server state | `/var/lib/deploy/<app>` | `manifest.json`, `manifest.prev.json`, `compose.prev.yml`, log |
 
@@ -159,6 +159,10 @@ Rules:
 - **Run `uv run pytest` before every push.** The release workflow's `test` job
   gates the build and deploy; a resolver/DB/route/form change needs a test.
   Do not validate a resolver change only with a redirect override.
+- **Run the lint gates before every push** (`ruff check`, `ruff format
+  --check`, `ty check --exclude test.py`, `deptry .`) or simply
+  `pre-commit run --all-files`; the CI `lint` job (including actionlint) gates
+  the build.
 - Documentation-only changes (`README.md`, `AGENTS.md`, `docs/**`) are skipped
   by the release workflow. Still keep `dev` and `main` identical: commit on
   `dev`, then fast-forward `main`.
@@ -221,7 +225,14 @@ Read these before changing anything.
 # local
 uv sync --frozen
 uv run python -m playgate.app
-uv run pytest
+uv run pytest --cov=playgate
+
+# quality gates (also run by pre-commit and CI)
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check --exclude test.py
+uv run deptry .
+uv run pre-commit run --all-files
 
 # image
 docker build -t ytaceproxy-proxy .
