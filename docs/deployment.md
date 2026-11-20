@@ -16,7 +16,7 @@ server compose and the release; Ansible owns the host, `.env`, hooks and
 
 | Layer | Source of truth | What it changes |
 |---|---|---|
-| application code | this repository, `proxy_ace/*` | routes, redirect logic, resolver, admin UI |
+| application code | this repository, `playgate/*` | routes, redirect logic, resolver, admin UI |
 | image | `Dockerfile` + dependencies | Python base, installed packages, entry point |
 | server compose | `deploy/compose/docker-compose.yml` | services, volumes, healthcheck, logging |
 | `.env` contract | `deploy/compose/env.required` | names the host `.env` must provide |
@@ -51,17 +51,16 @@ never starts application containers; `31_apps` never writes compose.
 | release | `prod-<run>` | `dev-<run>` |
 | directory | `/srv/ytaceproxy-prod` | `/srv/ytaceproxy-dev` |
 | data | `/var/lib/ytaceproxy-prod` | `/var/lib/ytaceproxy-dev` |
-| SQLite | `.../manager-data/proxies.db` | `.../manager-data/proxies.db` |
+| SQLite | `.../manager-data/channels.db` | `.../manager-data/channels.db` |
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
-| acestream | `6878` | `6879` |
-| acexy | `8090` | `8091` |
-| `ACEXY_BASE_URL` | `http://<tailnet-ip>:8090` | `http://<tailnet-ip>:8091` |
+| acestream (unused by the app) | `6878` | `6879` |
+| acexy (unused by the app) | `8090` | `8091` |
 | backup | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 | manifest/log | `/var/lib/deploy/<app>`, `/var/log/deploy/<app>.log` | same pattern |
 
 The two stacks share no database, cache, port or manifest and can run at the
-same time. Current releases are `prod-14` and `dev-13`, both compose
-`sha256 8d422c1c…`; the live value is in each manifest.
+same time. Current releases are whichever `/var/lib/deploy/<app>/manifest.json`
+says; do not copy release numbers from old notes.
 
 ## 3. Release flow
 
@@ -157,36 +156,46 @@ ssh asus@debian "sudo ls -l /var/backups/ytaceproxy/<env>/"
 
 | Change | Edit | Then |
 |---|---|---|
-| redirect/fallback logic, new route | `proxy_ace/handler.py`, `proxy_ace/app.py` | test locally, push `dev` |
-| resolver format/timeout/concurrency | `proxy_ace/config.py` | push `dev`; check `/yt_dlp/.../upd` |
-| admin UI fields or templates | `proxy_ace/admin_routes.py`, `proxy_ace/forms/*.html` | push `dev`; verify UI |
-| DB queries | `proxy_ace/repo.py` | push `dev`; check post-deploy log |
+| redirect/fallback logic, new route | `playgate/handler.py`, `playgate/app.py` | test locally, push `dev` |
+| resolver format/timeout/concurrency | `playgate/config.py` | push `dev`; check `/play/.../upd` |
+| quality selector / channel form | `playgate/forms.py` | push `dev`; verify UI |
+| TTL badge | `playgate/ttl.py` | push `dev`; verify UI |
+| admin routes/templates | `playgate/admin_routes.py`, `playgate/forms/*.html`, `playgate/static/admin.css` | push `dev`; verify UI |
+| DB queries | `playgate/repo.py` | push `dev`; check post-deploy log |
 | dependencies | `pyproject.toml` + `uv.lock` | `uv lock`, rebuild image |
 | base image, port, entry point | `Dockerfile` | keep port 80 and `/app/data`; push `dev` |
-| ACE redirect / URL builder | `proxy_ace/ace.py`, `proxy_ace/handler.py` | test on `dev` |
 
 No Ansible change is needed for normal application code: the image digest is
 the only server-side change.
 
 ### 5.2 Database shape
 
-The schema is created by `proxy_ace/db.py` with `CREATE TABLE IF NOT EXISTS`;
+The schema is created by `playgate/db.py` with `CREATE TABLE IF NOT EXISTS`;
 there is no migration framework.
 
 | Change | Edit | Extra |
 |---|---|---|
-| add a table | `proxy_ace/db.py`, `proxy_ace/repo.py` | created automatically on startup, including existing DBs |
-| add a column | `proxy_ace/db.py`, `proxy_ace/repo.py` | existing DBs need a manual migration |
+| add a table | `playgate/db.py`, `playgate/repo.py` | created automatically on startup, including existing DBs |
+| add a column | `playgate/db.py`, `playgate/repo.py` | existing DBs need a manual `ALTER TABLE` |
 | required table for post-deploy | `arch2debian/roles/ytaceproxy/templates/post-deploy.sh.j2` | run `31_apps` |
-| remove legacy `ace_streaming_channels` | `db.py`, post-deploy template, docs | take a backup first; see [roadmap.md](roadmap.md) |
+| rename the database file | `playgate/db.py`, both hook templates, docs | wipe the old file after the release; see below |
 
-Before any schema-changing deploy, run the pre-deploy hook or let the wrapper
-run it. If the new image cannot read the old schema, restore
-`/var/backups/ytaceproxy/<env>/pre-*.db` while the manager is stopped.
+The single-table `/play` model was a deliberate clean start: `channels.db` is a
+new file, `channels` is the only table, and the previous `proxies.db` is
+deleted per environment after the release. There was no data migration and no
+transitional acceptance in `post-deploy.sh`.
 
-`ace_channels` is now present on dev and prod, and the legacy table was dropped
-on both. The post-deploy hook still accepts either table during the
-transition; tighten it after the next prod release.
+Order per environment: **release first, hooks after**:
+
+1. the release runs with the old hooks, which still match the old
+   `proxies.db`; its pre-deploy makes the last backup of the old file;
+2. `31_apps -e env=<env>` installs the hooks that require `channels.db` and
+   `channels`;
+3. delete the old `proxies.db` (the new image never opens it);
+4. re-create channels from the old backup if they matter.
+
+The new image creates `channels.db` on startup, so the new hooks are valid by
+the time they are installed.
 
 ### 5.3 Compose, ports, volumes
 
@@ -194,7 +203,6 @@ transition; tighten it after the next prod release.
 |---|---|---|
 | published port or bind address | `arch2debian/inventory/group_vars/debian_servers/exposure.yml` (`ytace_<env>_*`) | `15_firewall`, `30_services` (policy), `31_apps` (`.env`), restart/release |
 | service, volume, healthcheck, logging | `deploy/compose/docker-compose.yml` | release; `40_verify` |
-| manager `ACEXY_BASE_URL` | compose reads `${ACEXY_BASE_URL}`; value comes from Ansible `.env` | must be client-reachable, not Docker DNS |
 | data/cache directory layout | `roles/ytaceproxy/tasks/environment.yml`, defaults; compose uses `${DATA_DIR}` | `31_apps` |
 | pre/post hook behaviour | `roles/ytaceproxy/templates/*.j2` | `31_apps`; next deploy uses them |
 | environment-specific ports | `inventory/group_vars/debian_servers/main.yml` (`ytaceproxy_environments`) + `exposure.yml` | `15_firewall`, `30_services`, `31_apps`, restart/release |
@@ -208,7 +216,9 @@ outside `DATA_DIR`, host escapes, mutable images and non-`json-file` logging.
 
 ### 5.4 Companion images and manifest keys
 
-The manager is built here. `acestream` and `acexy` are pinned in the workflow:
+The manager is built here. `acestream` and `acexy` are still pinned in the
+workflow and shipped in the compose, although the application no longer uses
+them (the `/ace` route was removed; their fate is a roadmap decision):
 
 ```yaml
 env:
@@ -216,7 +226,7 @@ env:
   ACEXY_IMAGE: ghcr.io/javinator9889/acexy:0.2.2
 ```
 
-When changing a companion version or adding a service:
+When changing a companion version or adding/removing a service:
 
 1. update the tag in `.github/workflows/release.yml`;
 2. update `deploy/build_manifest.py` (`IMAGE_KEYS`) and the companions
@@ -250,7 +260,7 @@ changing expectations.
 
 ### 5.6 Secrets and CI configuration
 
-- Application secrets, if added, belong in Ansible Vault and are rendered into
+- Application secrets, if added, belong in Ansible Vault and rendered into
   a `0600` `.env` or compose environment; never commit them.
 - GitHub Actions needs only `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_USER`,
   `DEPLOY_KNOWN_HOSTS`, `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`.
@@ -291,28 +301,24 @@ ssh asus@debian "sudo docker inspect -f '{{.Config.Image}}' $APP-manager-1"
 
 # 4. UI and test redirects
 curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/health
-curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/redirects
-curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/ace
+curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/channels
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
-  http://<tailnet-ip>:<manager-port>/yt_dlp/<channel>
-curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
-  http://<tailnet-ip>:<manager-port>/ace/<channel>
+  http://<tailnet-ip>:<manager-port>/play/<channel>
 
 # 5. backup
 ssh asus@debian "sudo ls -lt /var/backups/ytaceproxy/$ENV/ | head"
 
 # 6. full contract check
 cd arch2debian
-.venv/bin/ansible-playbook playbooks/40_verify.yml -e ansible_host=debian
+.venv/bin/ansible-playbook playbooks/40_verify.yml
 ```
 
 The acceptance criteria are: the manifest has exactly `manager`, `acestream`,
 `acexy` and the three `config` keys; the compose file hash equals
 `config.compose_sha256`; `required_env` is present in `.env`; the policy
-passes; the manager is healthy; `/health` answers 200; both admin pages answer;
-a known `/yt_dlp` redirect is 302; a known `/ace` channel is 302 to the
-environment's acexy port; a pre-deploy backup exists; running images equal the
-manifest digests.
+passes; the manager is healthy; `/health` answers 200; `/admin/channels`
+answers; a known `/play` channel is 302; a pre-deploy backup exists; running
+images equal the manifest digests.
 
 ## 7. Rollback
 
@@ -338,15 +344,14 @@ Only when the schema broke. Stop the manager, restore the backup, start it:
 APP=ytaceproxy-dev
 ENV=dev
 ssh asus@debian "sudo /srv/$APP/compose.sh stop manager"
-ssh asus@debian "sudo cp /var/backups/ytaceproxy/$ENV/pre-<ts>.db /var/lib/ytaceproxy-$ENV/manager-data/proxies.db"
+ssh asus@debian "sudo cp /var/backups/ytaceproxy/$ENV/pre-<ts>.db /var/lib/ytaceproxy-$ENV/manager-data/channels.db"
 ssh asus@debian "sudo /srv/$APP/compose.sh start manager"
 ```
 
 There are no migrations, so an image rollback does not roll back the schema;
-the pre-deploy backup is the restore point. `ace_channels` is additive and can
-stay in place during a rollback. The old image may recreate the empty
-`ace_streaming_channels` table during the transition; that is harmless and can
-be dropped again.
+the pre-deploy backup is the restore point. The single-table rollout was a
+deliberate wipe: a pre-change backup contains the old `proxies.db` with
+`redirect_channels`/`ace_channels`, not the new `channels` schema.
 
 ## 8. Known operational notes
 
@@ -354,10 +359,11 @@ be dropped again.
   environment; the release starts the stack.
 - The manager healthcheck is an HTTP `GET /health` inside the container: it
   proves the web app answers and SQLite is readable.
-- `ACEXY_BASE_URL` comes from `.env` (tailnet IP + per-environment acexy port).
-  Re-run `31_apps` after a Tailscale address or port change.
+- The old `/app/data/proxies.db` is obsolete. Do not recreate it.
 - Logs are capped per container (`json-file`, 10 MB × 3).
 - Memory limits are intentionally not set; measured usage is far below the
   host limit.
+- The `acestream`/`acexy` companions still run but nothing in the app uses
+  them; removing or relocating them is a deferred roadmap decision.
 - The old single-stack `/srv/ytaceproxy` and `/var/lib/danilaltd-ytaceproxy-dev`
   are not used by the current deployment.

@@ -2,20 +2,14 @@ from dataclasses import dataclass
 import time
 from typing import Optional
 
+
 @dataclass
-class RedirectChannel:
+class Channel:
     name: str
     url: str
-    redirect_url: Optional[str]
+    redirect_url: Optional[str] = None
+    format: Optional[str] = None
     ttl: Optional[int] = None
     created_at: Optional[float] = time.time()
     id: Optional[int] = None
     dirty: Optional[bool] = False
-
-
-@dataclass
-class AceChannel:
-    name: str
-    content_id: str
-    created_at: Optional[float] = time.time()
-    id: Optional[int] = None

@@ -1,15 +1,4 @@
-import pytest
-
-import proxy_ace.db as db
-from proxy_ace.app import create_app
-
-
-@pytest.fixture
-async def app(tmp_path, monkeypatch):
-    db_path = tmp_path / "proxies.db"
-    monkeypatch.setattr(db, "DB_PATH", str(db_path))
-    await db.init_db()
-    return await create_app()
+import playgate.db as db
 
 
 async def test_health_ok(aiohttp_client, app):
@@ -24,7 +13,7 @@ async def test_health_ok(aiohttp_client, app):
 async def test_health_unhealthy_without_database(
     aiohttp_client, app, monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "missing" / "proxies.db"))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "missing" / "channels.db"))
     client = await aiohttp_client(app)
 
     response = await client.get("/health")

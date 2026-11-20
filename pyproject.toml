@@ -1,7 +1,7 @@
 [project]
-name = "ytaceproxy"
+name = "playgate"
 version = "0.0.0"
-description = "aiohttp redirect manager for yt-dlp and acexy playback"
+description = "Named 302 redirects for stream sources, with an admin UI"
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp==3.13.3",

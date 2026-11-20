@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Channels · playgate{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <h1>Channels</h1>
+    <a class="button" href="{{ app_prefix }}{{ url_for('channel_add') }}">Add channel</a>
+</div>
+
+<table>
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Source</th>
+        <th>Quality</th>
+        <th>Redirect</th>
+        <th>TTL</th>
+        <th>Created</th>
+        <th>Actions</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for ch in channels %}
+    <tr>
+        <td class="muted">{{ ch.id }}</td>
+        <td><a href="{{ app_prefix }}/play/{{ ch.name }}"><code>{{ ch.name }}</code></a></td>
+        <td class="url" title="{{ ch.url }}">{{ ch.url|truncate(64) }}</td>
+        <td><code>{{ ch.format or "default" }}</code></td>
+        <td>
+            {% if ch.redirect_url %}
+            <span class="badge resolved">resolved</span>
+            {% else %}
+            <span class="badge unknown">none</span>
+            {% endif %}
+        </td>
+        {% set ttl = ttl_state(ch.ttl) %}
+        <td><span class="badge {{ ttl.state }}">{{ ttl.label }}</span></td>
+        <td class="muted">{{ ch.created_at }}</td>
+        <td class="actions">
+            <a href="{{ app_prefix }}{{ url_for('channel_edit', id=ch.id) }}">Edit</a>
+            <form method="post" action="{{ app_prefix }}{{ url_for('channel_update', id=ch.id) }}" class="inline">
+                <button type="submit" class="secondary">Update now</button>
+            </form>
+            <form method="post" action="{{ app_prefix }}{{ url_for('channel_del', id=ch.id) }}" class="inline"
+                  onsubmit="return confirm('Delete channel {{ ch.name }}?')">
+                <button type="submit" class="danger">Delete</button>
+            </form>
+        </td>
+    </tr>
+    {% else %}
+    <tr>
+        <td colspan="8" class="muted empty">No channels yet. Add one to get a <code>/play/&lt;name&gt;</code> redirect.</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

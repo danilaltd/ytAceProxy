@@ -7,9 +7,8 @@ services:
     ports:
       - "${MANAGER_PORT:-8088}:80"
     volumes:
+    
       - ${MANAGER_DB_PATH:-/var/lib/ace-ytdlp-manager/manager-data/}:/app/data
-    environment:
-      - ACEXY_BASE_URL=${ACEXY_BASE_URL:-http://localhost:8090}
     restart: ${RESTART_POLICY:-always}
 
   acestream:

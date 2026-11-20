@@ -1,8 +1,8 @@
 # Server-side stack shape for ytaceproxy-{dev,prod}.
 #
-# Host values (binds, ports, data dir, ACEXY_BASE_URL) come from
-# /srv/<app>/.env; image references come from the digest manifest. The release
-# workflow embeds this file in the manifest, so a change here is a release.
+# Host values (binds, ports, data dir) come from /srv/<app>/.env; image
+# references come from the digest manifest. The release workflow embeds this
+# file in the manifest, so a change here is a release.
 services:
   manager:
     image: "${MANAGER_IMAGE_REF:?MANAGER_IMAGE_REF is required}"
@@ -11,10 +11,6 @@ services:
       - "${MANAGER_BIND:?MANAGER_BIND is required}:${MANAGER_PORT:?MANAGER_PORT is required}:80"
     volumes:
       - "${DATA_DIR:?DATA_DIR is required}/manager-data:/app/data"
-    environment:
-      # Client-facing acexy address: /ace/{name} returns this in Location.
-      # Docker DNS name "acexy" is not reachable by the player.
-      ACEXY_BASE_URL: "${ACEXY_BASE_URL:?ACEXY_BASE_URL is required}"
     labels:
       # The wrapper policy checks published binds against this address.
       io.arch2debian.tailscale-ip: "${TAILSCALE_IP:?TAILSCALE_IP is required}"

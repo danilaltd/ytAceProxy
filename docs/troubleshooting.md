@@ -176,21 +176,19 @@ The wrapper prints `=== deploy failed` and rolls the image back to
 ssh asus@debian "sudo tail -n 120 /var/log/deploy/ytaceproxy-dev.log"
 ```
 
-The post-deploy hook checks `PRAGMA integrity_check`, `redirect_channels` and
-The post-deploy hook checks `PRAGMA integrity_check`, the required tables
-(`redirect_channels` and `ace_channels`) and the redirect count. A failed check
-means the new image cannot use the current database. The image and compose are
-rolled back; the database is **not**. Restore the last `pre-*.db` backup if the
-schema is incompatible.
+The post-deploy hook checks `PRAGMA integrity_check`, the `channels` table and
+the channel count. A failed check means the new image cannot use the current
+database. The image and compose are rolled back; the database is **not**.
+Restore the last `pre-*.db` backup if the schema is incompatible.
 
 ## Application
 
 ### `/health` returns 503
 
 The manager serves, but SQLite is unreadable (wrong bind mount, a corrupt
-database or a missing `redirect_channels` table). The container healthcheck
-fails and `docker compose up -d --wait` blocks, so a deploy in this state
-rolls back. Check:
+database or a missing `channels` table). The container healthcheck fails and
+`docker compose up -d --wait` blocks, so a deploy in this state rolls back.
+Check:
 
 ```bash
 ssh asus@debian "sudo /srv/ytaceproxy-dev/compose.sh ps"
@@ -200,7 +198,7 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:8089/health
 
 Fix the volume or restore the pre-deploy backup; do not edit `/srv` by hand.
 
-### `/yt_dlp/<name>` returns 404
+### `/play/<name>` returns 404
 
 Expected when:
 
@@ -212,53 +210,29 @@ Check the database:
 ```bash
 ssh asus@debian "sudo docker exec -i ytaceproxy-dev-manager-1 python - <<'PY'
 import sqlite3
-c = sqlite3.connect('/app/data/proxies.db')
-print(c.execute('select id,name,url,redirect_url,ttl from redirect_channels').fetchall())
+c = sqlite3.connect('/app/data/channels.db')
+print(c.execute('select id,name,url,format,redirect_url,ttl from channels').fetchall())
 PY"
 ```
 
-Add or fix the redirect in `/admin/redirects`, or add a `placeholder` row.
+Add or fix the channel at `/admin/channels`, or add a `placeholder` row.
 
-### `/yt_dlp/<name>` returns 302 but the link is expired
+### `/play/<name>` returns 302 but the link is expired
 
-`ttl` is in the past. Use `/yt_dlp/<name>/upd` or the admin sync action to
+`ttl` is in the past. Use `/play/<name>/upd` or the admin “Update now” button to
 re-resolve. If `yt-dlp` fails, the old `redirect_url` remains; check the manager
 logs.
 
-### `/ace/<name>` returns 404
+### A quality selector is rejected
 
-Expected when `ace_channels` has no row with that name. Add it at
-`/admin/ace`; the content id must be 40 hexadecimal characters. Check:
+Merge selectors (`bestvideo+bestaudio` and anything with `+`) need ffmpeg,
+which the image does not include. Use a single-format selector such as
+`best[height<=720]`. The add/edit form rejects `+` for this reason.
 
-```bash
-ssh asus@debian "sudo docker exec -i ytaceproxy-dev-manager-1 python - <<'PY'
-import sqlite3
-c = sqlite3.connect('/app/data/proxies.db')
-print(c.execute('select id,name,content_id from ace_channels').fetchall())
-PY"
-```
+### The player still points at `/yt_dlp`
 
-### `/ace/<name>` returns 503
-
-`ACEXY_BASE_URL` is missing or invalid. The value must be an absolute
-`http`/`https` origin, for example `http://<tailnet-ip>:8091`, not the Docker
-name `http://acexy:80`.
-
-```bash
-ssh asus@debian "sudo docker exec ytaceproxy-dev-manager-1 printenv ACEXY_BASE_URL"
-```
-
-If it is empty, update the `.env` template/value and run
-`31_apps -e env=dev`, then restart the manager through `compose.sh` or a
-release. Do not edit `/srv/ytaceproxy-dev/docker-compose.yml` by hand; it is
-written from the release manifest.
-
-### `/ace/<name>` redirects to the wrong acexy port
-
-The manager uses the `ACEXY_BASE_URL` of its environment: prod `8090`, dev
-`8091`. Check the `.env` value and the published port; a copied `.env` or a
-wrong inventory value is the usual cause. Run `31_apps -e env=dev|prod`, then
-restart through `compose.sh` or a release.
+The old route is removed. Update the playlist/player URLs to `/play/<name>`;
+unknown paths return 404.
 
 ### `uv sync --frozen` fails after changing dependencies
 
@@ -274,9 +248,10 @@ it with `latest`.
 
 ### Admin UI returns 500 after a local run
 
-`aiohttp_jinja2` loads templates with `FileSystemLoader('proxy_ace/forms')`,
-relative to the process working directory. Run the app from the repository
-root, or use the Docker image where `WORKDIR /app` is set.
+Templates and static assets are loaded package-relative (`playgate/forms`,
+`playgate/static`), so the working directory no longer matters. If the page
+still fails, check that the package was copied into the image (`Dockerfile`
+`COPY . ./`) and read the traceback in the logs.
 
 ### Admin UI is unreachable
 
@@ -284,7 +259,7 @@ The deployed UI binds to the Tailscale IP, not the LAN:
 
 ```bash
 ssh asus@debian "sudo ss -ltnp | grep -E ':(8088|8089)'"
-curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:8089/admin/redirects
+curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:8089/admin/channels
 ```
 
 Check that Tailscale is running on the client and that the port belongs to the
@@ -318,11 +293,12 @@ ssh asus@debian "sudo docker inspect -f '{{json .Mounts}}' ytaceproxy-dev-manage
 
 Fix the role/volume, not the live container.
 
-### Old `channels.db` confusion
+### Old `proxies.db` / `channels.db` confusion
 
-`channels.db` is the old JSON-era store. The current service uses
-`/app/data/proxies.db`. Do not copy `channels.db` into the data directory and do
-not restore its rows into `redirect_channels`; the formats are unrelated.
+`/app/data/channels.db` is the current SQLite file with the single `channels`
+table. The old `/app/data/proxies.db` (`redirect_channels`/`ace_channels`) and
+the JSON-era `channels.db` copies are obsolete. Do not restore either; a
+pre-change backup is only for disaster recovery of the previous model.
 
 ## Where to look next
 

@@ -1,11 +1,11 @@
-# ytAceProxy
+# ytAceProxy (code name: playgate)
 
 Short entry point for a new session. Read this first; details are linked below.
 
 ## What this project is
 
-An `aiohttp` application that resolves streaming URLs with `yt-dlp` and returns
-HTTP 302 redirects to the resolved link. Redirects are stored in SQLite and
+An `aiohttp` application that resolves a stream source URL with `yt-dlp` and
+returns an HTTP 302 to the direct playback URL. Channels live in SQLite and are
 managed through a server-rendered admin UI. The application is packaged as a
 Docker image and deployed as two independent stacks:
 
@@ -16,8 +16,15 @@ Docker image and deployed as two independent stacks:
 | release | `prod-*` | `dev-*` |
 | compose/data | `/srv/ytaceproxy-prod`, `/var/lib/ytaceproxy-prod` | `/srv/ytaceproxy-dev`, `/var/lib/ytaceproxy-dev` |
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
-| acestream / acexy | `6878` / `8090` | `6879` / `8091` |
+| acestream / acexy (unused by the app) | `6878` / `8090` | `6879` / `8091` |
 | backup | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
+
+**Naming (scope decided 2026-11-20):** the code-level project is `playgate`
+(`playgate/*`, `/play/{name}`, `/admin/channels`, `/app/data/channels.db`). The
+GitHub repository (`ytAceProxy`), image (`ghcr.io/danilaltd/ytaceproxy-proxy`),
+deploy apps (`ytaceproxy-*`), `/srv` paths, Ansible role and exposure keys keep
+their historical names until the deferred infrastructure rename. Do not rename
+those piecemeal.
 
 The image is `ghcr.io/danilaltd/ytaceproxy-proxy`. CI builds it on a
 GitHub-hosted runner and deploys immutable digests plus the compose shape
@@ -49,40 +56,30 @@ Canonical contract: `arch2debian/docs/deployment-contract.md`.
   every required name non-empty) and `/usr/local/libexec/deploy-compose-policy`
   before applying. The guards reject host escapes/build, binds outside
   `DATA_DIR`, ports outside `arch2debian`'s exposure matrix, mutable images and
-  non-`json-file` logging. `env_file` is a source-review rule (Compose merges it
-  into `environment`).
+  non-`json-file` logging.
 - A compose change is a release with the same digests and a new hash.
 - Commands: `31_apps -e env=dev|prod` for env/hooks, a release for compose,
   `40_verify` for the contract check.
 
-## Current state (snapshot: 2026-11-19)
+## Current state (snapshot: 2026-11-20)
 
-- Both stacks are healthy: `ytaceproxy-prod` release `prod-14` and
+- At the start of this change: `ytaceproxy-prod` release `prod-14` and
   `ytaceproxy-dev` release `dev-13`, both compose `sha256 8d422c1c…`.
-- Both stacks run manifest v2 and wrapper v2. `ace_channels` exists on dev and
-  prod; the legacy `ace_streaming_channels` was dropped on prod after the
-  backup `/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db` (dev was
-  cleaned earlier).
-- `ACEXY_BASE_URL` is present on dev and prod; the prod post-deploy check
-  reports `redirects=2`.
-- `/health` answers 200 on both stacks and the manager healthcheck uses it
-  instead of a bare TCP connect.
-- The post-deploy hook requires `redirect_channels` and `ace_channels`; the
-  transition that also accepted `ace_streaming_channels` is closed (applied
-  with `31_apps` on dev and prod).
+- The single-table `/play` model is implemented on `dev` and is being rolled
+  out through `dev` → `main`. Check the live release in each manifest.
+- `/ace`, `ace_channels`, `ACEXY_BASE_URL` and the ACE admin pages are removed.
+  The `acestream`/`acexy` containers still deploy but nothing in the app uses
+  them; their fate is a deferred roadmap decision.
+- The SQLite file is `/app/data/channels.db` with one table, `channels`. The old
+  `proxies.db` is obsolete and is deleted per environment after the rollout.
 - `verify_apps: true`; the last `40_verify` passed.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
-- `deploy/compose/` holds the server compose shape (`docker-compose.yml`),
-  `env.required` and the CI fixture `ci.env`. The release workflow validates
-  the compose with the fixture and calls `deploy/build_manifest.py` to build
-  manifest v2 (`config.compose_b64`, `config.compose_sha256`,
-  `config.required_env`).
 - Application documentation is complete: `README.md`, `AGENTS.md`,
   `docs/architecture.md`, `docs/deployment.md`, `docs/development.md`,
   `docs/troubleshooting.md`, `docs/roadmap.md`.
-- Next agreed work: structured logging and removing the host-published
-  `acestream` ports after clients migrate.
+- Next agreed work: structured logging, the companions decision, memory
+  limits.
 
 The release numbers above are a snapshot, not an invariant. Check before
 relying on them:
@@ -111,7 +108,7 @@ ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.js
 
 | Layer | Repository | Responsibility |
 |---|---|---|
-| application | `danilaltd/ytAceProxy` (this repo) | `proxy_ace/*`, tests, Dockerfile, `pyproject.toml`/`uv.lock`, admin templates |
+| application | `danilaltd/ytAceProxy` (this repo) | `playgate/*`, tests, Dockerfile, `pyproject.toml`/`uv.lock`, admin templates |
 | server shape | `danilaltd/ytAceProxy` (`deploy/compose/`) | `docker-compose.yml`, `env.required`, `ci.env` |
 | release pipeline | `.github/workflows/release.yml` | build, companion digests, manifest v2, Tailscale + forced-command deploy |
 | server infrastructure | `danilaltd/arch2debian` | `.env`, exposure matrix, data dirs, hooks, `compose.sh`, wrapper/policy, verify |
@@ -120,22 +117,17 @@ ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.js
 ## Runtime shape
 
 ```text
-client ──GET /yt_dlp/<name>──▶ manager :80 (aiohttp)
+client ──GET /play/<name>───▶ manager :80 (aiohttp)
                                   │
-                                  ├─ redirect_channels in proxies.db
+                                  ├─ channels in /app/data/channels.db
                                   └─ yt-dlp subprocess (timeout 60 s)
-
-client ──GET /ace/<name>─────▶ manager :80 (aiohttp)
                                   │
-                                  ├─ ace_channels in proxies.db
-                                  └─ 302 ──▶ acexy :80 ──▶ acestream engine :6878
-                                             (companion images, not this service)
+                                  └─ 302 Location ──▶ client
 ```
 
-The manager, `acestream` and `acexy` are separate containers in the same
-compose project. The manager does not stream video itself; it only resolves
-links and redirects. `ACEXY_BASE_URL` must be an address the **client** can
-reach, not the Docker DNS name `acexy`.
+The deployed compose still contains `acestream` and `acexy`, but the manager
+does not reference them. The manager never streams video: it only resolves a
+URL and redirects.
 
 ## Git workflow
 
@@ -175,58 +167,57 @@ Rules:
 Read these before changing anything.
 
 1. **Port 80 inside the manager container.** `LISTEN_PORT = 80` in
-   `proxy_ace/app.py`; host ports are assigned by Ansible.
-2. **SQLite at `/app/data/proxies.db`.** The path is in `proxy_ace/db.py`;
-   the host directory is mounted by Ansible. Do not introduce a different
-   database path without changing the role, hooks and backups.
+   `playgate/app.py`; host ports are assigned by Ansible.
+2. **SQLite at `/app/data/channels.db`.** The path is in `playgate/db.py`; the
+   host directory is mounted by Ansible. The pre/post hooks reference the same
+   file. Do not introduce a different database path without changing the role,
+   hooks and backups.
 3. **Schema is auto-created, not migrated.** `init_db()` runs
    `CREATE TABLE IF NOT EXISTS`. There is no migration framework. A schema
    change is a deploy-time risk; take a backup before deploying.
-4. **`redirect_channels` and `ace_channels` are the active tables.** Current
-   code does not create `ace_streaming_channels`; the legacy table was dropped
-   on dev and prod. The post-deploy hook still accepts it during the
-   transition. See [docs/roadmap.md](docs/roadmap.md).
-5. **Unknown yt-dlp channel falls back to `placeholder`.** If neither the
-   channel nor `placeholder` has a `redirect_url`, `/yt_dlp/{name}` returns
-   404. Do not change this contract silently.
+4. **`channels` is the only table.** ACE tables and content ids are gone. Do
+   not reintroduce `/ace`, `ace_channels` or `ACEXY_BASE_URL` silently.
+5. **Unknown channel falls back to `placeholder`.** If neither the channel nor
+   `placeholder` has a `redirect_url`, `/play/{name}` returns 404. Do not
+   change this contract silently.
 6. **URL resolution is out-of-process.** `yt-dlp` runs in a separate process
    with a 60-second timeout and a concurrency limit of 2. Never call
    `yt-dlp` inline in the event loop.
-7. **Admin UI is tailnet-only.** There is no basic auth and no production
+7. **Per-channel quality uses `channels.format`.** Dedup is by
+   `(source URL, format)`. Merge selectors (`+`) are rejected: the image has no
+   ffmpeg.
+8. **Admin UI is tailnet-only.** There is no basic auth and no production
    approval. Do not add a public bind or an auth bypass.
-8. **CI ships image digests and the compose shape.** The server compose is
+9. **CI ships image digests and the compose shape.** The server compose is
    `deploy/compose/docker-compose.yml`, embedded in manifest v2 with its
-   sha256 and `required_env`. `.env` values (ports, binds, `DATA_DIR`,
-   `ACEXY_BASE_URL`), hooks, `compose.sh` and backups remain Ansible-managed.
-   `30_services` never writes compose; the wrapper writes `/srv/<app>`.
-   Never edit `/srv` by hand.
-9. **Deploy references are immutable digests.** The forced command accepts
-   only `ghcr.io/...@sha256:<64hex>` from the per-app allowlist. There is no
-   tag fallback.
-10. **Prod and dev are independent.** Separate directories, data, ports,
+   sha256 and `required_env`. `.env` values (ports, binds, `DATA_DIR`), hooks,
+   `compose.sh` and backups remain Ansible-managed. `30_services` never writes
+   compose; the wrapper writes `/srv/<app>`. Never edit `/srv` by hand.
+10. **Deploy references are immutable digests.** The forced command accepts
+    only `ghcr.io/...@sha256:<64hex>` from the per-app allowlist. There is no
+    tag fallback.
+11. **Prod and dev are independent.** Separate directories, data, ports,
     manifests, logs and backups. Never point prod at the dev data directory.
-11. **No secrets in git or CI.** `.env`, keys, tokens and `channels.db` are
-    untracked. Runtime secrets, if added, go through Ansible Vault and `.env`.
-12. **Do not restore the old `channels.db`.** It is a different JSON-era
-    store; `proxies.db` is the SQLite database.
-13. **`/ace/{name}` is a redirect, not a proxy.** It returns 302 to
-    `ACEXY_BASE_URL/ace/getstream?id=<content_id>`; unknown names return 404,
-    a missing `ACEXY_BASE_URL` returns 503. Never use `http://acexy:80` as the
-    client-facing base URL.
+12. **No secrets in git or CI.** `.env`, keys, tokens and old `channels.db`
+    copies are untracked. Runtime secrets, if added, go through Ansible Vault
+    and `.env`.
+13. **Do not restore the old `proxies.db` or `channels.db`.** Both are from
+    older designs (`redirect_channels`/`ace_channels` and the JSON-era store);
+    the current database is `/app/data/channels.db` with the `channels` table.
+14. **Logs never contain source or resolved URLs.** They can carry tokens. Log
+    channel names, TTL and sanitised errors only.
 
 ## Commands
 
 ```bash
 # local
 uv sync --frozen
-ACEXY_BASE_URL=http://localhost:8090 uv run python -m proxy_ace.app
+uv run python -m playgate.app
 uv run pytest
 
 # image
 docker build -t ytaceproxy-proxy .
-docker run --rm -p 8089:80 \
-  -e ACEXY_BASE_URL=http://localhost:8090 \
-  -v "$PWD/data:/app/data" ytaceproxy-proxy
+docker run --rm -p 8089:80 -v "$PWD/data:/app/data" ytaceproxy-proxy
 
 # CI status
 gh run list --repo danilaltd/ytAceProxy --workflow Release
@@ -239,6 +230,9 @@ APP=ytaceproxy-dev
 ssh asus@debian "sudo jq . /var/lib/deploy/$APP/manifest.json"
 ssh asus@debian "sudo tail -n 80 /var/log/deploy/$APP.log"
 ssh asus@debian "sudo /srv/$APP/compose.sh ps"
+# env/hooks apply
+cd arch2debian
+.venv/bin/ansible-playbook playbooks/31_apps.yml -e env=dev
 # full contract check
 .venv/bin/ansible-playbook playbooks/40_verify.yml
 ```
@@ -251,7 +245,7 @@ ssh asus@debian "sudo /srv/$APP/compose.sh ps"
 | how to deploy, environments, change matrix, rollback | [docs/deployment.md](docs/deployment.md) |
 | local run, adding routes, tests, uv | [docs/development.md](docs/development.md) |
 | real failures and fixes | [docs/troubleshooting.md](docs/troubleshooting.md) |
-| planned tests/health and acestream exposure | [docs/roadmap.md](docs/roadmap.md) |
+| planned logging/companions/memory work | [docs/roadmap.md](docs/roadmap.md) |
 | Ansible role, ports, hooks | `arch2debian/roles/ytaceproxy/README.md` |
 | canonical ownership and manifest | `arch2debian/docs/deployment-contract.md` |
 | CI/CD and wrapper | `arch2debian/docs/ci-cd.md` |
@@ -260,11 +254,12 @@ ssh asus@debian "sudo /srv/$APP/compose.sh ps"
 
 | Change | Touch |
 |---|---|
-| redirect behaviour / new route | `proxy_ace/handler.py`, `proxy_ace/app.py`, `tests/`, push `dev` |
-| ACE channel redirect / URL builder | `proxy_ace/ace.py`, `proxy_ace/repo.py`, `proxy_ace/handler.py` |
-| admin UI | `proxy_ace/admin_routes.py`, `proxy_ace/forms/*.html` |
-| resolver format/timeout | `proxy_ace/config.py` |
-| DB columns/tables | `proxy_ace/db.py`, `proxy_ace/repo.py`, `post-deploy.sh.j2`, backup |
+| redirect behaviour / new route | `playgate/handler.py`, `playgate/app.py`, `tests/`, push `dev` |
+| channel schema / queries | `playgate/db.py`, `playgate/repo.py`, `playgate/models.py`, `post-deploy.sh.j2`, backup |
+| resolver format/timeout/concurrency | `playgate/config.py` |
+| quality selector / form validation | `playgate/forms.py` |
+| TTL badge | `playgate/ttl.py` |
+| admin UI | `playgate/admin_routes.py`, `playgate/forms/*.html`, `playgate/static/admin.css` |
 | Python dependencies | `pyproject.toml` + `uv.lock`; never edit `uv.lock` by hand |
 | base image / runtime | `Dockerfile`; keep port 80 and `/app/data` |
 | published port / bind | `arch2debian/inventory/group_vars/debian_servers/exposure.yml`, then `15_firewall`/`30_services`/`31_apps` |
@@ -296,9 +291,9 @@ ssh asus@debian "sudo /srv/$APP/compose.sh ps"
 
 The next agreed work is:
 
-1. add a small `/health` endpoint and structured logging improvements;
-2. remove the host-published `acestream` ports after all clients use `/ace`
-   through `acexy`;
+1. structured logging with request/channel fields (URLs stay out of logs);
+2. decide the fate of the `acestream`/`acexy` companions: host-level Docker or
+   removal (deferred, not decided);
 3. revisit memory limits after a week of `docker stats` data.
 
 Do not implement these silently as part of an unrelated change; use

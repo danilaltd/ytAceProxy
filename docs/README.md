@@ -8,13 +8,12 @@
 | [deployment.md](deployment.md) | environments, release flow, what to change where, verification, rollback |
 | [development.md](development.md) | local development, adding routes/schema, tests, uv |
 | [troubleshooting.md](troubleshooting.md) | real failures and the commands that diagnose them |
-| [roadmap.md](roadmap.md) | health/logging, hook tightening, acestream exposure |
+| [roadmap.md](roadmap.md) | structured logging, companions decision, memory limits |
 
 Server-side documentation lives in the Ansible repository:
 
-- `arch2debian/docs/deployment-contract.md` — canonical ownership, manifest
-  v2, compose policy, guards;
-- `arch2debian/roles/ytaceproxy/README.md` — two stacks, `.env`, hooks, data;
+- `arch2debian/roles/ytaceproxy/README.md` — two stacks, ports, hooks, data;
+- `arch2debian/docs/deployment-contract.md` — canonical ownership, manifest v2;
 - `arch2debian/docs/ci-cd.md` — manifest contract, forced command, allowlist;
 - `arch2debian/docs/operations.md` — day-2 changes, dev/prod, dry run;
 - `arch2debian/docs/decisions.md` — recorded design decisions.
@@ -22,8 +21,7 @@ Server-side documentation lives in the Ansible repository:
 Rules:
 
 - one topic per file, named by subject;
-- a contract change (endpoint, env var, table, compose, manifest key) updates
-  the document that states it in the same commit;
+- a contract change updates the document that states it in the same commit;
 - no secrets, tokens or private keys;
 - when docs and code disagree, the code wins;
 - documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) are ignored

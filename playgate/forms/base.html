@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}playgate{% endblock %}</title>
+    <link rel="stylesheet" href="{{ app_prefix }}/static/admin.css">
+</head>
+<body>
+<header class="topbar">
+    <a class="brand" href="{{ app_prefix }}/admin/channels">playgate</a>
+    <nav>
+        <a href="{{ app_prefix }}/admin/channels">Channels</a>
+        <form method="post" action="{{ app_prefix }}{{ url_for('channel_sync') }}" class="inline">
+            <button type="submit" class="secondary">Sync all</button>
+        </form>
+    </nav>
+</header>
+{% if message %}<div class="flash">{{ message }}</div>{% endif %}
+<main>
+    {% block content %}{% endblock %}
+</main>
+</body>
+</html>

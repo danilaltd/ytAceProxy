@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} · playgate{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<form method="post" class="card">
+    <label for="name">Name</label>
+    {{ form.name(id="name") }}
+    {% if form.name.errors %}<div class="error">{{ form.name.errors[0] }}</div>{% endif %}
+
+    <label for="url">Source URL</label>
+    {{ form.url(id="url") }}
+    {% if form.url.errors %}<div class="error">{{ form.url.errors[0] }}</div>{% endif %}
+
+    <label for="format">Quality</label>
+    {{ form.format(id="format") }}
+    {% if form.format.errors %}<div class="error">{{ form.format.errors[0] }}</div>{% endif %}
+
+    <label for="format_custom">Custom format (optional)</label>
+    {{ form.format_custom(id="format_custom", placeholder="e.g. best[height<=720]") }}
+    <div class="hint">A yt-dlp format selector. Merge formats (<code>+</code>) are not supported: the image has no ffmpeg.</div>
+    {% if form.format_custom.errors %}<div class="error">{{ form.format_custom.errors[0] }}</div>{% endif %}
+
+    <label for="redirect_url">Redirect override (optional)</label>
+    {{ form.redirect_url(id="redirect_url") }}
+    <div class="hint">If set, <code>/play/&lt;name&gt;</code> returns this URL instead of the resolved one.</div>
+    {% if form.redirect_url.errors %}<div class="error">{{ form.redirect_url.errors[0] }}</div>{% endif %}
+
+    <div class="form-actions">
+        <button type="submit">Save</button>
+        <a class="button secondary" href="{{ app_prefix }}{{ url_for('channel_list') }}">Cancel</a>
+    </div>
+</form>
+{% endblock %}

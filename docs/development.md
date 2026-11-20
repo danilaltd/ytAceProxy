@@ -4,23 +4,24 @@
 
 | Path | Purpose |
 |---|---|
-| `proxy_ace/app.py` | `aiohttp` application, routes, startup/shutdown |
-| `proxy_ace/handler.py` | `/yt_dlp`, `/ace`, `/health` handlers and redirect response |
-| `proxy_ace/admin_routes.py` | admin list/add/edit/delete/sync routes |
-| `proxy_ace/config.py` | `yt-dlp` resolution, sync logic, TTL parsing |
-| `proxy_ace/ace.py` | acexy URL construction from `ACEXY_BASE_URL` |
-| `proxy_ace/db.py` | SQLite path and schema creation |
-| `proxy_ace/repo.py` | SQL queries for redirects and ACE channels |
-| `proxy_ace/models.py` | `RedirectChannel` and `AceChannel` dataclasses |
-| `proxy_ace/state.py` | process-wide stop event |
-| `proxy_ace/forms/` | WTForms and Jinja2 templates |
+| `playgate/app.py` | `aiohttp` application, routes, startup/shutdown |
+| `playgate/handler.py` | `/play`, `/health` handlers and redirect response |
+| `playgate/admin_routes.py` | `/admin/channels` routes (list/add/edit/delete/update/sync) |
+| `playgate/config.py` | `yt-dlp` resolution, per-format dedup, sync logic, TTL parsing |
+| `playgate/ttl.py` | TTL state and human duration for the admin badge |
+| `playgate/db.py` | SQLite path, schema creation, health read |
+| `playgate/repo.py` | SQL queries for channels |
+| `playgate/models.py` | `Channel` dataclass |
+| `playgate/state.py` | process-wide stop event |
+| `playgate/forms/` | WTForms and Jinja2 templates (`base`, `channels`, `channel_form`) |
+| `playgate/static/admin.css` | local stylesheet, no CDN or build step |
 | `tests/` | pytest unit and handler tests |
 | `pyproject.toml`, `uv.lock` | dependencies and lock file |
 | `Dockerfile` | image build with `uv sync --frozen` |
-| `.github/workflows/release.yml` | build and digest deploy |
+| `.github/workflows/release.yml` | build, manifest v2 and digest deploy |
 
-There is no `channels.json` and no watcher. The old `/ace/{channel}` streaming
-endpoint is gone; `/ace/{name}` is now a redirect into `acexy`.
+There is no `channels.json` and no watcher. ACE playback was removed: there is
+no `/ace` route, ACE table or `ACEXY_BASE_URL`.
 
 ## Run locally
 
@@ -28,64 +29,59 @@ Dependencies are managed by `uv`:
 
 ```bash
 uv sync --frozen
-ACEXY_BASE_URL=http://localhost:8090 uv run python -m proxy_ace.app
+uv run python -m playgate.app
 uv run pytest
 ```
 
 The server binds `0.0.0.0:80` (through `web.TCPSite(port=80)`), so either run
 with the needed privileges or temporarily change `LISTEN_PORT` in
-`proxy_ace/app.py` on a local branch.
+`playgate/app.py` on a local branch.
 
-The database path is the container path `/app/data/proxies.db`. For a
+The database path is the container path `/app/data/channels.db`. For a
 non-Docker run, mount or create that directory, or change `DB_PATH` in a local
 patch. Do not commit a local path change.
 
-`ACEXY_BASE_URL` is read from the environment at request time. A local value is
-`http://localhost:8090` when the browser runs on the Docker host; use the host
-IP when the browser is elsewhere. Without it, `/ace` returns 503.
+The admin UI is at `/admin/channels`. Static assets are served from
+`playgate/static/` via a package-relative path, so the working directory does
+not matter (unlike the old relative template loader).
 
-## Add or change a redirect route
+## Add or change a route
 
-1. Add the handler in `proxy_ace/handler.py`.
-2. Register it in `create_app()` in `proxy_ace/app.py`.
-3. If it reads the database, add a function in `proxy_ace/repo.py` instead of
+1. Add the handler in `playgate/handler.py`.
+2. Register it in `create_app()` in `playgate/app.py`.
+3. If it reads the database, add a function in `playgate/repo.py` instead of
    opening `aiosqlite` in the handler.
-4. If it changes a redirect, mark the model `dirty` and persist through
-   `update_redirects()`.
+4. If it changes a channel, mark the model `dirty` and persist through
+   `update_channels()`.
 5. Add or update tests in `tests/`.
 6. Update `README.md`, `docs/architecture.md` and the deployment checklist if
    the public contract changes.
-7. Push `dev`, verify `/yt_dlp/...` or `/ace/...`, then merge `main`.
+7. Push `dev`, verify `/play/...`, then merge `main`.
 
-Keep the unknown-channel contract: `/yt_dlp`: channel → `placeholder` → 404.
-`/ace`: unknown name → 404; no placeholder fallback.
-
-`/ace` must return a client-reachable URL. Do not use the Docker service name
-`acexy` as the base URL; clients do not resolve it. Use
-`ace.build_acexy_stream_url()` instead of concatenating strings.
+Keep the unknown-channel contract: `/play`: channel → `placeholder` → 404.
 
 ## Add a database column or table
 
 The schema is created only with `CREATE TABLE IF NOT EXISTS`; there is no
 migration runner. A new table works automatically for a brand-new database and
-for an existing one on the next startup. A new column does not.
+for an existing one on the next startup. A new column does not: existing
+databases need a one-shot `ALTER TABLE` after a backup.
 
-1. Change `CREATE_TABLES_SQL` in `proxy_ace/db.py`.
-2. Update `proxy_ace/repo.py` and the model.
+1. Change `CREATE_TABLES_SQL` in `playgate/db.py`.
+2. Update `playgate/repo.py` and the model.
 3. If the post-deploy hook must check the new table, update
    `arch2debian/roles/ytaceproxy/templates/post-deploy.sh.j2` and apply it
    with `31_apps -e env=dev|prod`.
 4. Take a pre-deploy backup and test on `dev` first.
-5. If the change cannot be additive, write the one-off migration for the
-   existing database and document it in `docs/deployment.md`.
+5. If the change cannot be additive, document the one-off procedure in
+   `docs/deployment.md`.
 
-Never mutate `proxies.db` on the host by hand while the manager is running.
+Never mutate `channels.db` on the host by hand while the manager is running.
 Use the pre-deploy backup or a one-shot `docker exec` with `sqlite3`, and keep
 the result in the deployment log.
 
-`ace_channels` was added additively. The old `ace_streaming_channels` is no
-longer created and was dropped on dev and prod. The post-deploy hook still
-accepts it during the transition; see [roadmap.md](roadmap.md).
+The single-table `/play` model was a clean start: `channels.db` is a new file,
+the old `proxies.db` is obsolete, and no data was migrated.
 
 ## Resolver notes
 
@@ -95,11 +91,20 @@ synchronous and can block for seconds. When changing it:
 - keep the timeout (default 60 s) and the process cleanup in `finally`;
 - keep `MAX_PROCESSES` bounded;
 - do not call `YoutubeDL` from the event loop;
-- remember `ttl = -1` means “eternal” and a future timestamp means “valid”;
-- log failures without logging source credentials or query secrets.
+- keep the dedup key `(source URL, format)` — two channels can share a URL with
+  different quality;
+- reject merge selectors (`+`): the image has no ffmpeg;
+- remember `ttl = -1` means “eternal”, a future timestamp means “valid” and
+  `NULL` means “unknown”;
+- log failures without source/resolved URLs; both can carry tokens. Use the
+  `_safe_error()` sanitiser.
 
-ACE channels do not use the resolver: they are a name plus a content id and are
-served directly as a redirect.
+## Quality selection
+
+`ChannelForm.format` is a preset select; `ChannelForm.format_custom` is an
+optional free-text selector. A non-empty custom value wins and is stored in
+`channels.format`; empty means the resolver default. `format_form_data()`
+round-trips a stored custom value back into the form.
 
 ## Tests
 
@@ -109,15 +114,16 @@ Tests use `pytest` + `pytest-aiohttp` and do not need the network:
 uv run pytest
 ```
 
-- `tests/test_ace_url.py` covers URL construction, trailing slashes, encoding,
-  and invalid or missing `ACEXY_BASE_URL`.
-- `tests/test_ace_handler.py` uses a temporary SQLite file and the aiohttp test
-  client to cover 302, 404 and 503, plus the fresh-database table set.
-- `tests/test_health.py` covers the 200/503 health responses with and without
-  a readable database.
+- `tests/conftest.py` provides a temporary `channels.db` and an `app` fixture;
+  an autouse fixture stubs background resolution.
+- `tests/test_play.py` covers 302, 404, `placeholder` fallback and the
+  `upd` endpoint.
+- `tests/test_admin.py` covers list/add/edit/delete/update/sync, duplicate
+  names, URL-separator rejection and merge-format rejection.
+- `tests/test_ttl.py` covers eternal/valid/expired/unknown and humanisation.
+- `tests/test_health.py` covers the 200/503 health responses.
 
-Do not hit a real streaming site in tests. When adding a test for the resolver,
-use a fake resolver or a pure function.
+Do not hit a real streaming site in tests.
 
 ## Dependency management (uv)
 
@@ -143,5 +149,5 @@ Rules:
 ## Commit style
 
 One concern per commit, message `type(scope): summary` (for example
-`feat(ace): redirect /ace to acexy`, `test(ace): cover URL construction`).
+`feat(channels): add quality selection`, `test(ttl): cover the badge states`).
 Do not rewrite history or move tags.

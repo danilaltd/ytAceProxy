@@ -1,47 +1,82 @@
-import pytest
-
-import proxy_ace.db as db
-import proxy_ace.repo as repo
-from proxy_ace.app import create_app
+import playgate.admin_routes as admin_routes
+import playgate.repo as repo
 
 
-CONTENT_ID = "dd1e67078381739d14beca697356ab76d49d1a20"
-
-
-@pytest.fixture
-async def app(tmp_path, monkeypatch):
-    db_path = tmp_path / "proxies.db"
-    monkeypatch.setattr(db, "DB_PATH", str(db_path))
-    monkeypatch.setattr(repo, "DB_PATH", str(db_path))
-    await db.init_db()
-    return await create_app()
-
-
-async def test_ace_admin_creates_and_lists_channel(aiohttp_client, app):
+async def test_admin_index_redirects_to_channels(aiohttp_client, app):
     client = await aiohttp_client(app)
 
-    created = await client.post(
-        "/admin/ace/add",
-        data={"name": "nsf", "content_id": CONTENT_ID},
-        allow_redirects=False,
-    )
-    assert created.status == 302
-    assert created.headers["Location"] == "/admin/ace"
+    response = await client.get("/admin", allow_redirects=False)
 
-    listing = await client.get("/admin/ace")
-    assert listing.status == 200
-    body = await listing.text()
+    assert response.status == 302
+    assert response.headers["Location"] == "/admin/channels"
+
+
+async def test_channels_page_lists_created_channel(aiohttp_client, app):
+    await repo.add_channel("nsf", "http://source", "http://target", -1, "best")
+    client = await aiohttp_client(app)
+
+    response = await client.get("/admin/channels")
+
+    assert response.status == 200
+    body = await response.text()
     assert "nsf" in body
-    assert CONTENT_ID in body
+    assert "best" in body
 
 
-async def test_ace_admin_rejects_duplicate_name(aiohttp_client, app):
-    await repo.add_ace_channel("nsf", CONTENT_ID)
+async def test_add_channel_stores_format_and_redirects(aiohttp_client, app):
     client = await aiohttp_client(app)
 
     response = await client.post(
-        "/admin/ace/add",
-        data={"name": "nsf", "content_id": CONTENT_ID},
+        "/admin/channels/add",
+        data={
+            "name": "nsf",
+            "url": "http://source",
+            "format": "best",
+            "format_custom": "",
+            "redirect_url": "",
+        },
+        allow_redirects=False,
+    )
+
+    assert response.status == 302
+    assert response.headers["Location"] == "/admin/channels?msg=added"
+    channels = await repo.get_channels()
+    assert len(channels) == 1
+    assert channels[0].format == "best"
+
+
+async def test_add_channel_uses_custom_format(aiohttp_client, app):
+    client = await aiohttp_client(app)
+
+    await client.post(
+        "/admin/channels/add",
+        data={
+            "name": "nsf",
+            "url": "http://source",
+            "format": "",
+            "format_custom": "best[height<=720]",
+            "redirect_url": "",
+        },
+        allow_redirects=False,
+    )
+
+    channels = await repo.get_channels()
+    assert channels[0].format == "best[height<=720]"
+
+
+async def test_add_channel_rejects_duplicate_name(aiohttp_client, app):
+    await repo.add_channel("nsf", "http://source", None, None, None)
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        "/admin/channels/add",
+        data={
+            "name": "nsf",
+            "url": "http://other",
+            "format": "",
+            "format_custom": "",
+            "redirect_url": "",
+        },
         allow_redirects=False,
     )
 
@@ -49,65 +84,122 @@ async def test_ace_admin_rejects_duplicate_name(aiohttp_client, app):
     assert "already exists" in await response.text()
 
 
-async def test_ace_admin_edits_and_deletes_channel(aiohttp_client, app):
-    await repo.add_ace_channel("nsf", CONTENT_ID)
-    channel = (await repo.get_ace_channels())[0]
-    client = await aiohttp_client(app)
-
-    edited = await client.post(
-        f"/admin/ace/edit/{channel.id}",
-        data={"name": "x_nsf", "content_id": CONTENT_ID},
-        allow_redirects=False,
-    )
-    assert edited.status == 302
-
-    channels = await repo.get_ace_channels()
-    assert len(channels) == 1
-    assert channels[0].name == "x_nsf"
-
-    deleted = await client.get(
-        f"/admin/ace/delete/{channel.id}",
-        allow_redirects=False,
-    )
-    assert deleted.status == 302
-    assert await repo.get_ace_channels() == []
-
-
-async def test_ace_admin_rejects_url_separators_in_name(aiohttp_client, app):
+async def test_add_channel_rejects_merge_format(aiohttp_client, app):
     client = await aiohttp_client(app)
 
     response = await client.post(
-        "/admin/ace/add",
-        data={"name": "bad/name", "content_id": CONTENT_ID},
+        "/admin/channels/add",
+        data={
+            "name": "nsf",
+            "url": "http://source",
+            "format": "",
+            "format_custom": "bestvideo+bestaudio",
+            "redirect_url": "",
+        },
         allow_redirects=False,
     )
 
     assert response.status == 200
-    assert 'must not contain' in await response.text()
+    assert "ffmpeg" in await response.text()
 
 
-async def test_ace_admin_rejects_bad_content_id(aiohttp_client, app):
+async def test_add_channel_rejects_url_separators_in_name(aiohttp_client, app):
     client = await aiohttp_client(app)
 
     response = await client.post(
-        "/admin/ace/add",
-        data={"name": "nsf", "content_id": "not-a-hash"},
+        "/admin/channels/add",
+        data={
+            "name": "bad/name",
+            "url": "http://source",
+            "format": "",
+            "format_custom": "",
+            "redirect_url": "",
+        },
         allow_redirects=False,
     )
 
     assert response.status == 200
-    assert "40 hexadecimal characters" in await response.text()
+    assert "must not contain" in await response.text()
 
 
-async def test_yt_dlp_redirect_and_placeholder_still_work(aiohttp_client, app):
-    await repo.add_redirect("nsf", "http://source", "http://target", -1)
-    await repo.add_redirect("placeholder", "http://source", "http://fallback", -1)
+async def test_edit_channel_updates_fields(aiohttp_client, app):
+    await repo.add_channel("nsf", "http://source", "http://target", -1, None)
+    channel = (await repo.get_channels())[0]
     client = await aiohttp_client(app)
 
-    known = await client.get("/yt_dlp/nsf", allow_redirects=False)
-    assert known.status == 302
-    assert known.headers["Location"] == "http://target"
+    response = await client.post(
+        f"/admin/channels/{channel.id}/edit",
+        data={
+            "name": "renamed",
+            "url": "http://new-source",
+            "format": "18",
+            "format_custom": "",
+            "redirect_url": "",
+        },
+        allow_redirects=False,
+    )
 
-    fallback = await client.get("/yt_dlp/missing", allow_redirects=False)
-    assert fallback.status == 302
-    assert fallback.headers["Location"] == "http://fallback"
+    assert response.status == 302
+    updated = await repo.get_channel_by_id(channel.id)
+    assert updated.name == "renamed"
+    assert updated.url == "http://new-source"
+    assert updated.format == "18"
+
+
+async def test_delete_channel_removes_row(aiohttp_client, app):
+    await repo.add_channel("nsf", "http://source", None, None, None)
+    channel = (await repo.get_channels())[0]
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        f"/admin/channels/{channel.id}/delete",
+        allow_redirects=False,
+    )
+
+    assert response.status == 302
+    assert await repo.get_channels() == []
+
+
+async def test_update_now_starts_background_refresh(aiohttp_client, app, monkeypatch):
+    calls = []
+
+    async def fake_update(name, context=None):
+        calls.append(name)
+
+    monkeypatch.setattr(admin_routes, "update_special_channel", fake_update)
+    await repo.add_channel("nsf", "http://source", None, None, None)
+    channel = (await repo.get_channels())[0]
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        f"/admin/channels/{channel.id}/update",
+        allow_redirects=False,
+    )
+
+    assert response.status == 302
+    assert response.headers["Location"] == "/admin/channels?msg=update-started"
+    assert calls == ["nsf"]
+
+
+async def test_sync_starts_background_task(aiohttp_client, app, monkeypatch):
+    calls = []
+
+    async def fake_sync():
+        calls.append("sync")
+
+    monkeypatch.setattr(admin_routes, "sync_channels", fake_sync)
+    client = await aiohttp_client(app)
+
+    response = await client.post("/admin/channels/sync", allow_redirects=False)
+
+    assert response.status == 302
+    assert response.headers["Location"] == "/admin/channels?msg=sync-started"
+    assert calls == ["sync"]
+
+
+async def test_unknown_edit_id_returns_404(aiohttp_client, app):
+    client = await aiohttp_client(app)
+
+    response = await client.get("/admin/channels/999/edit")
+
+    assert response.status == 404

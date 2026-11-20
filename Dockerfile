@@ -18,4 +18,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 80
 
-CMD ["python", "-m", "proxy_ace.app"]
+CMD ["python", "-m", "playgate.app"]

@@ -6,43 +6,43 @@ than kept as a changelog.
 Done:
 
 - migrated dependency management and the image build to `uv`;
-- removed the legacy ACE table/stub and the `ACE Channels` admin title;
-- added `/ace/{name}` → `acexy` redirects with a separate `ace_channels`
-  table and admin page, tested on dev and prod;
-- added `pytest` tests for URL construction, 404/503 and the fresh schema;
-- dropped the empty `ace_streaming_channels` table on dev and on prod. The prod
-  backup is `/var/backups/ytaceproxy/prod/pre-2026-11-19-133555.db`;
+- removed the ACE playback path entirely: `/ace`, `ace_channels`,
+  `ACEXY_BASE_URL` and the ACE admin pages;
+- replaced the two tables with one `channels` table in a new
+  `/app/data/channels.db` (clean start, no migration; old `proxies.db` removed
+  per environment);
+- renamed the code-level project to `playgate`; `/play/{name}` is the only
+  public redirect, `/admin/channels` is the only admin page;
+- added per-channel quality (`channels.format`), TTL badges, per-row
+  “Update now”, a local stylesheet and a unified admin;
+- added `/health` and switched the manager healthcheck to it;
+- tightened the post-deploy hook to require `channels`;
 - moved the server compose into `deploy/compose/` and switched both stacks to
-  manifest v2 and wrapper v2;
-- added `/health` with a SQLite read check and switched the manager healthcheck
-  from a TCP connect to it;
-- tightened the post-deploy hook to require `redirect_channels` and
-  `ace_channels` (applied with `31_apps` on dev and prod after `prod-12` proved
-  the new table on both stacks).
+  manifest v2 and wrapper v2.
 
 Remaining work:
 
-## 1. Remove the host-published acestream ports
+## 1. Structured logging
 
-`acexy` reaches `acestream` over the Docker network, so the host-published
-`6878`/`6879` ports are only needed for direct engine access. After all clients
-use `/ace` through `acexy`:
+Add structured logging with request/channel fields. Source and resolved URLs
+must stay out of the logs (they may carry tokens); this is already enforced in
+the resolver, keep it that way.
 
-1. remove the `acestream` published port from
-   `deploy/compose/docker-compose.yml`;
-2. remove the corresponding `ytace_<env>_stream` entries from
-   `arch2debian/inventory/group_vars/debian_servers/exposure.yml` and
-   `arch2debian/roles/verify`;
-3. run `15_firewall`, `30_services` (policy) and `31_apps` (`.env`), then cut a
-   compose release and run `40_verify`;
-4. smoke-test `/ace` in dev and prod.
+## 2. Decide the fate of the acestream/acexy companions
 
-Until then, direct access remains possible and bypasses acexy's multiplexing.
+The `/ace` route is gone and nothing in the manager references these services,
+but the compose still ships and publishes them (host ports `6878/6879` and
+`8090/8091`). Options:
 
-## 2. Structured logging
+1. move `acestream` + `acexy` to a host-level Docker compose managed by
+   Ansible (leaning, **deferred, not decided**);
+2. remove them from the stack entirely;
+3. keep them as they are.
 
-Add structured logging with request/channel fields, without logging resolved
-URLs that contain credentials or ACE content ids.
+Any option changes the exact manifest image set, the wrapper allowlist, the
+compose policy, `roles/verify`, `exposure.yml` and `.env`. The infrastructure
+rename of the deployed identities (`ytaceproxy-*`, image, `/srv`, role)
+should happen together with this decision, not before, to avoid two cutovers.
 
 ## 3. Memory limits
 
@@ -52,10 +52,9 @@ below the host limit, so this is not urgent.
 ## Order
 
 1. Structured logging.
-2. Acestream port removal (after clients migrate).
+2. Companions decision (and the deferred infrastructure rename with it).
 3. Memory limits.
 
-Each application change follows the same release path: `dev` → verify → `main`
-→ verify, with a pre-deploy SQLite backup and a green `40_verify`. Compose
-changes go through `deploy/compose/docker-compose.yml`, not an Ansible
-template.
+Each application change follows the release path: `dev` → verify → `main` →
+verify, with a pre-deploy backup and a green `40_verify`. Compose changes go
+through `deploy/compose/docker-compose.yml`, not an Ansible template.
