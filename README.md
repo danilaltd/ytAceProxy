@@ -23,10 +23,10 @@ manifest.
 
 ## Current state
 
-Snapshot (2026-11-20): `ytaceproxy-dev` is `dev-13` and `ytaceproxy-prod` is
-`prod-14`; both run manifest v2. The single-table `/play` model is implemented
-on `dev` and is being rolled out. Release numbers are a snapshot, not an
-invariant — check `/var/lib/deploy/<app>/manifest.json` or the latest `Release`
+Snapshot (2026-11-20): `ytaceproxy-dev` is `dev-17` and `ytaceproxy-prod` is
+`prod-18`; both run manifest v2 and compose `sha256 3dc0d3fd…`. The
+single-table `/play` model is deployed on both stacks. Release numbers are a
+snapshot, not an invariant — check `/var/lib/deploy/<app>/manifest.json` or the latest `Release`
 run. Session start, Git rules and live-state commands are in
 [AGENTS.md](AGENTS.md); ownership is in
 `arch2debian/docs/deployment-contract.md`.
