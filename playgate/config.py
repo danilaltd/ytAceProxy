@@ -64,7 +64,7 @@ async def run_in_process_with_timeout(
     fmt: str | None,
     stop_event: asyncio.Event,
     timeout: int = 60,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     q: "Queue[tuple[str, str]]" = Queue(1)
     p = Process(target=worker_target, args=(url, fmt, q))
     p.start()
@@ -82,7 +82,7 @@ async def run_in_process_with_timeout(
                 tag, payload = q.get_nowait()
                 p.join()
                 if tag == "ok":
-                    return url, payload
+                    return url, fmt or DEFAULT_FORMAT, payload
                 raise Exception(payload)
 
             if elapsed >= timeout:
