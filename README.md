@@ -23,8 +23,8 @@ manifest.
 
 ## Current state
 
-Snapshot (2026-11-20): `ytaceproxy-dev` is `dev-21` and `ytaceproxy-prod` is
-`prod-22`; both run manifest v2 and compose `sha256 3dc0d3fd…`. The
+Snapshot (2026-11-20): `ytaceproxy-dev` is `dev-23` and `ytaceproxy-prod` is
+`prod-24`; both run manifest v2 and compose `sha256 3dc0d3fd…`. The
 single-table `/play` model is deployed on both stacks. Release numbers are a
 snapshot, not an invariant — check `/var/lib/deploy/<app>/manifest.json` or the latest `Release`
 run. Session start, Git rules and live-state commands are in
