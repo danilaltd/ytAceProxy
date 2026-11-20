@@ -34,5 +34,5 @@ async def test_init_db_creates_only_the_channels_table(tmp_path, monkeypatch):
 async def test_check_db_raises_without_a_database(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "missing" / "channels.db"))
 
-    with pytest.raises(Exception):
+    with pytest.raises(sqlite3.OperationalError):
         await db.check_db()

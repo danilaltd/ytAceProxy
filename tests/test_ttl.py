@@ -2,7 +2,6 @@ import pytest
 
 from playgate.ttl import humanize_duration, ttl_state
 
-
 NOW = 1_800_000_000
 
 

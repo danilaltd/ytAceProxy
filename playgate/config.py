@@ -1,11 +1,12 @@
-import datetime
-from multiprocessing import Process, Queue
-from collections import defaultdict
 import asyncio
+import datetime
 import logging
 import re
 import time
-from typing import Any, Coroutine, Protocol
+from collections import defaultdict
+from collections.abc import Coroutine
+from multiprocessing import Process, Queue
+from typing import Any, Protocol
 
 from yt_dlp import YoutubeDL, parse_options
 
@@ -65,7 +66,7 @@ async def run_in_process_with_timeout(
     stop_event: asyncio.Event,
     timeout: int = 60,
 ) -> tuple[str, str, str]:
-    q: "Queue[tuple[str, str]]" = Queue(1)
+    q: Queue[tuple[str, str]] = Queue(1)
     p = Process(target=worker_target, args=(url, fmt, q))
     p.start()
 
@@ -88,7 +89,7 @@ async def run_in_process_with_timeout(
             if elapsed >= timeout:
                 p.terminate()
                 p.join(timeout=2)
-                raise asyncio.TimeoutError("resolve timeout")
+                raise TimeoutError("resolve timeout")
 
             await asyncio.sleep(interval)
             elapsed += interval

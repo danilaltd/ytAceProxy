@@ -1,13 +1,13 @@
 services:
   manager:
     image: ${PROXY_IMAGE:-proxy}
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "${MANAGER_PORT:-8088}:80"
     volumes:
-    
+
       - ${MANAGER_DB_PATH:-/var/lib/ace-ytdlp-manager/manager-data/}:/app/data
     restart: ${RESTART_POLICY:-always}
 
@@ -42,4 +42,3 @@ services:
       - acestream
     depends_on:
       - acestream
-

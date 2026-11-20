@@ -1,6 +1,7 @@
 import asyncio
 import sqlite3
-from typing import Any, Dict
+from collections.abc import Coroutine
+from typing import Any
 
 import aiohttp_jinja2
 from aiohttp import web
@@ -32,6 +33,14 @@ MESSAGES = {
     "sync-started": "Sync started in the background.",
 }
 
+_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _spawn(coro: Coroutine[Any, Any, None]) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 def _redirect(request: web.Request, path: str, message: str | None = None):
     location = request.get("app_prefix", "") + path
@@ -44,7 +53,7 @@ def _channel_id(request: web.Request) -> int:
     try:
         return int(request.match_info["id"])
     except (KeyError, ValueError):
-        raise web.HTTPNotFound()
+        raise web.HTTPNotFound() from None
 
 
 def _render_form(request: web.Request, form: ChannelForm, title: str):
@@ -69,7 +78,7 @@ async def channels_page(request: web.Request):
 
 @routes.get("/admin/channels/add", name="channel_add")
 @aiohttp_jinja2.template("channel_form.html")
-async def add_channel_page(request: web.Request) -> Dict[str, Any]:
+async def add_channel_page(request: web.Request) -> dict[str, Any]:
     return {"form": ChannelForm(), "title": "Add channel"}
 
 
@@ -88,9 +97,13 @@ async def add_channel_handler(request: web.Request):
                 effective_format(form),
             )
         except sqlite3.IntegrityError:
-            form.name.errors.append("A channel with this name already exists")
+            # WTForms stubs type Field.errors as tuple[()]; it is a list at runtime.
+            form.name.errors = [  # ty: ignore[invalid-assignment]
+                *form.name.errors,
+                "A channel with this name already exists",
+            ]
         else:
-            asyncio.create_task(update_special_channel(form.name.data, appContext))
+            _spawn(update_special_channel(form.name.data, appContext))
             raise _redirect(request, "/admin/channels", "added")
 
     return _render_form(request, form, "Add channel")
@@ -98,7 +111,7 @@ async def add_channel_handler(request: web.Request):
 
 @routes.get("/admin/channels/{id}/edit", name="channel_edit")
 @aiohttp_jinja2.template("channel_form.html")
-async def edit_channel_page(request: web.Request) -> Dict[str, Any]:
+async def edit_channel_page(request: web.Request) -> dict[str, Any]:
     channel = await get_channel_by_id(_channel_id(request))
     if channel is None:
         raise web.HTTPNotFound()
@@ -133,12 +146,16 @@ async def edit_channel_handler(request: web.Request):
         try:
             await update_channel(updated)
         except sqlite3.IntegrityError:
-            form.name.errors.append("A channel with this name already exists")
+            # WTForms stubs type Field.errors as tuple[()]; it is a list at runtime.
+            form.name.errors = [  # ty: ignore[invalid-assignment]
+                *form.name.errors,
+                "A channel with this name already exists",
+            ]
         else:
             if existing.url != updated.url or (existing.format or "") != (
                 updated.format or ""
             ):
-                asyncio.create_task(update_special_channel(updated.name, appContext))
+                _spawn(update_special_channel(updated.name, appContext))
             raise _redirect(request, "/admin/channels", "updated")
 
     return _render_form(request, form, "Edit channel")
@@ -156,11 +173,11 @@ async def update_channel_handler(request: web.Request):
     if channel is None:
         raise web.HTTPNotFound()
 
-    asyncio.create_task(update_special_channel(channel.name, appContext))
+    _spawn(update_special_channel(channel.name, appContext))
     raise _redirect(request, "/admin/channels", "update-started")
 
 
 @routes.post("/admin/channels/sync", name="channel_sync")
 async def sync_channels_handler(request: web.Request):
-    asyncio.create_task(sync_channels())
+    _spawn(sync_channels())
     raise _redirect(request, "/admin/channels", "sync-started")

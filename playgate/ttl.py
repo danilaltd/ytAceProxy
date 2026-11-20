@@ -1,5 +1,4 @@
 import time
-from typing import Optional
 
 
 def humanize_duration(seconds: int) -> str:
@@ -18,7 +17,7 @@ def humanize_duration(seconds: int) -> str:
     return "<1m"
 
 
-def ttl_state(ttl: Optional[int], now: Optional[float] = None) -> dict[str, str]:
+def ttl_state(ttl: int | None, now: float | None = None) -> dict[str, str]:
     if ttl is None:
         return {"state": "unknown", "label": "unknown"}
     if ttl == -1:

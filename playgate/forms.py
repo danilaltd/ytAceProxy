@@ -1,6 +1,5 @@
 from wtforms import Form, SelectField, StringField, validators
 
-
 FORMAT_CHOICES = [
     ("", "Default (best with audio)"),
     ("best[acodec!=none]", "best[acodec!=none]"),

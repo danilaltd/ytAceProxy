@@ -1,9 +1,10 @@
 import logging
+
 from aiohttp import web
 
+from .config import update_special_channel
 from .db import check_db
 from .repo import get_redirect_url
-from .config import update_special_channel
 from .state import AppContext, appContext
 
 logger = logging.getLogger(__name__)

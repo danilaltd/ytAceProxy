@@ -7,7 +7,6 @@ import playgate.config as config
 import playgate.repo as repo
 from playgate.state import appContext
 
-
 RESOLVED = "http://hidden.example/stream?expire=1893456000"
 
 
@@ -23,7 +22,9 @@ async def test_resolve_channels_saves_redirect_and_ttl(app, monkeypatch):
     resolved = await config.resolve_channels(channels, asyncio.Event())
     await repo.update_channels(resolved)
 
+    assert channels[0].id is not None
     saved = await repo.get_channel_by_id(channels[0].id)
+    assert saved is not None
     assert saved.redirect_url == RESOLVED
     assert saved.ttl == 1893456000
 

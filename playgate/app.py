@@ -1,8 +1,9 @@
 import asyncio
 import logging
 import signal
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 import aiohttp_jinja2
 import jinja2
@@ -10,10 +11,10 @@ from aiohttp import web
 from aiohttp.web_request import Request
 from aiohttp.web_response import StreamResponse
 
-from .db import init_db
-from .state import appContext
 from .admin_routes import routes
+from .db import init_db
 from .handler import channel_handler, channel_upd_handler, health_handler
+from .state import appContext
 from .ttl import ttl_state
 
 LISTEN_PORT = 80

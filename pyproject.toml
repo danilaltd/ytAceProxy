@@ -7,14 +7,20 @@ dependencies = [
     "aiohttp==3.13.3",
     "aiohttp-jinja2==1.6",
     "aiosqlite==0.22.1",
+    "jinja2==3.1.6",
     "WTForms==3.2.1",
     "yt-dlp==2026.3.3",
 ]
 
 [dependency-groups]
 dev = [
+    "deptry>=0.25.1",
+    "pre-commit>=4.7.0",
     "pytest>=8.4",
     "pytest-aiohttp>=1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.6",
+    "ty>=0.0.107",
 ]
 
 [tool.uv]
@@ -25,3 +31,29 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PIE", "RUF", "PT", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.deptry]
+known_first_party = ["playgate"]
+
+[tool.deptry.per_rule_ignores]
+DEP002 = ["deptry", "pre-commit", "pytest-aiohttp", "pytest-cov", "ruff", "ty"]
+
+[tool.coverage.run]
+source = ["playgate"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80

@@ -67,7 +67,8 @@ def test_merge_format_is_rejected():
     )
 
     assert form.validate() is False
-    assert "ffmpeg" in form.format_custom.errors[0]
+    errors = list(form.format_custom.errors)
+    assert any("ffmpeg" in error for error in errors)
 
 
 def test_name_rejects_url_separators():

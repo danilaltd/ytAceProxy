@@ -168,7 +168,9 @@ async def test_edit_channel_updates_fields(aiohttp_client, app):
     )
 
     assert response.status == 302
+    assert channel.id is not None
     updated = await repo.get_channel_by_id(channel.id)
+    assert updated is not None
     assert updated.name == "renamed"
     assert updated.url == "http://new-source"
     assert updated.format == "18"

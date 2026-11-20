@@ -26,12 +26,14 @@ async def get_channel_by_id(id_: int) -> Channel | None:
 
 
 async def get_redirect_url(name: str) -> str | None:
-    async with aiosqlite.connect(db.DB_PATH) as connection:
-        async with connection.execute(
+    async with (
+        aiosqlite.connect(db.DB_PATH) as connection,
+        connection.execute(
             "SELECT redirect_url FROM channels WHERE name = ?", (name,)
-        ) as cursor:
-            row = await cursor.fetchone()
-            return row[0] if row else None
+        ) as cursor,
+    ):
+        row = await cursor.fetchone()
+        return row[0] if row else None
 
 
 async def add_channel(

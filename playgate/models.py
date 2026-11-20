@@ -1,15 +1,14 @@
-from dataclasses import dataclass
 import time
-from typing import Optional
+from dataclasses import dataclass
 
 
 @dataclass
 class Channel:
     name: str
     url: str
-    redirect_url: Optional[str] = None
-    format: Optional[str] = None
-    ttl: Optional[int] = None
-    created_at: Optional[float] = time.time()
-    id: Optional[int] = None
-    dirty: Optional[bool] = False
+    redirect_url: str | None = None
+    format: str | None = None
+    ttl: int | None = None
+    created_at: float | None = time.time()
+    id: int | None = None
+    dirty: bool | None = False
