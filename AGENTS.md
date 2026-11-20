@@ -63,8 +63,8 @@ Canonical contract: `arch2debian/docs/deployment-contract.md`.
 
 ## Current state (snapshot: 2026-11-20)
 
-- Both stacks are healthy: `ytaceproxy-prod` release `prod-18` and
-  `ytaceproxy-dev` release `dev-17`, both compose `sha256 3dc0d3fd…`.
+- Both stacks are healthy: `ytaceproxy-prod` release `prod-20` and
+  `ytaceproxy-dev` release `dev-19`, both compose `sha256 3dc0d3fd…`.
 - The single-table `/play` model is deployed on both stacks; prod has 2
   channels, dev has 0. The old `proxies.db` was removed on both.
 - `/ace`, `ace_channels`, `ACEXY_BASE_URL` and the ACE admin pages are removed.

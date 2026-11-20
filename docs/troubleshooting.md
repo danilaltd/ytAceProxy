@@ -217,6 +217,20 @@ PY"
 
 Add or fix the channel at `/admin/channels`, or add a `placeholder` row.
 
+### A new channel stays at 404 / the admin shows no redirect
+
+`redirect_url` is written only after a successful resolve. Check the manager
+logs:
+
+```bash
+ssh asus@debian "sudo docker logs --tail 100 ytaceproxy-prod-manager-1 2>&1 | grep -Ei 'resolve|Traceback' | tail"
+```
+
+A failed `yt-dlp` resolve leaves `redirect_url` empty; fix the source URL or
+quality and press “Update now”. The first single-table build had a resolver
+unpack bug that broke even successful resolves; it is fixed in `dev-19` /
+`prod-20` (tests in `tests/test_resolver.py`).
+
 ### `/play/<name>` returns 302 but the link is expired
 
 `ttl` is in the past. Use `/play/<name>/upd` or the admin “Update now” button to
