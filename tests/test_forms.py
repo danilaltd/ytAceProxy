@@ -84,3 +84,39 @@ def test_name_rejects_url_separators():
             )
         )
         assert form.validate() is False, name
+
+
+HASH = "a" * 40
+
+
+def test_valid_source_accepts_bare_hash():
+    form = ChannelForm(
+        FormData(
+            {
+                "name": "ace1",
+                "url": HASH.upper(),
+                "format": "",
+                "format_custom": "",
+            }
+        )
+    )
+
+    assert form.validate() is True
+    assert form.url.data == f"acestream://{HASH}"
+
+
+def test_valid_source_rejects_unknown_scheme():
+    form = ChannelForm(
+        FormData(
+            {
+                "name": "bad",
+                "url": "ftp://example.com/x",
+                "format": "",
+                "format_custom": "",
+            }
+        )
+    )
+
+    assert form.validate() is False
+    errors = list(form.url.errors)
+    assert any("Source must be" in error for error in errors)

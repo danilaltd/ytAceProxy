@@ -12,6 +12,7 @@ from yt_dlp import YoutubeDL, parse_options
 
 from .models import Channel
 from .repo import get_channels, update_channels
+from .sources import KIND_YT_DLP, parse_source
 from .state import AppContext, appContext
 
 MAX_PROCESSES = 2
@@ -107,6 +108,11 @@ def _key(channel: Channel) -> tuple[str, str]:
     return channel.url, (channel.format or DEFAULT_FORMAT).strip()
 
 
+def _is_yt_dlp(channel: Channel) -> bool:
+    source = parse_source(channel.url)
+    return source is not None and source.kind == KIND_YT_DLP
+
+
 async def resolve_channels(
     channels: list[Channel],
     stop_event: asyncio.Event,
@@ -116,6 +122,7 @@ async def resolve_channels(
     if force_update is None:
         force_update = []
 
+    channels = [channel for channel in channels if _is_yt_dlp(channel)]
     now = time.time()
     name_to_channel = {channel.name: channel for channel in channels}
 
@@ -201,6 +208,14 @@ async def update_eternal_channels(appContext: AppContext):
 async def update_special_channel(channel_name: str, appContext: AppContext):
     logger.info("start update_special_channel")
     channels: list[Channel] = await get_channels()
+    target = next(
+        (channel for channel in channels if channel.name == channel_name), None
+    )
+    if target is not None and not _is_yt_dlp(target):
+        logger.info(
+            "channel %s is not a yt-dlp source; nothing to resolve", channel_name
+        )
+        return
     await resolve_channels(channels, appContext.stop_event, force_update=[channel_name])
     await update_channels(channels)
     logger.info("end update_special_channel")

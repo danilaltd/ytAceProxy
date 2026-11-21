@@ -1,8 +1,9 @@
 # Architecture
 
-The service resolves a source URL with `yt-dlp` and returns a 302 redirect to
-the direct playback URL. Channels are managed through a small admin UI. The
-manager never streams video.
+The service resolves an http(s) source URL with `yt-dlp` and returns a 302
+redirect to the direct playback URL. Sources stored as `acestream://<40 hex>`
+are redirected to the `acexy` stream endpoint instead. Channels are managed
+through a small admin UI. The manager never streams video.
 
 ## Components
 
@@ -16,37 +17,43 @@ client ──HTTP─────────▶│ manager (aiohttp, port 80)  �
                        │ SQLite /app/data/channels.db│
                        │ channels                    │
                        └──────────────┬──────────────┘
-                                      │ yt-dlp subprocess
-                                      ▼
-                             source URL resolution
                                       │
-                                      └─ 302 Location ──▶ client
+                    ┌─────────────────┴──────────────────┐
+                    │ http(s): yt-dlp subprocess         │ acestream://: 302
+                    ▼                                    ▼
+             source URL resolution                 acexy (port 80)
+                    │                                    └─▶ acestream (6878)
+                    └─ 302 Location ──▶ client
 ```
 
-The deployed compose still contains the `acestream` and `acexy` companion
-containers, but the application no longer references them: the `/ace` route,
-`ace_channels` table and `ACEXY_BASE_URL` were removed. Their fate (host-level
-Docker or removal) is a deferred roadmap decision.
+The deployed compose contains the `acestream` and `acexy` companion containers;
+ACE channels reach them through `acexy`. The manager never streams video: it
+only resolves or redirects.
 
 ## Request flow
 
 ### `GET /play/{channel}`
 
 1. `handler.handle_channel` reads `{channel}` from the route.
-2. `repo.get_redirect_url(name)` selects `redirect_url` from `channels` by
-   name.
-3. If it is not null, `redirect_response()` returns `302` with `Location`.
-4. If the channel is unknown, the handler tries the special name
-   `placeholder`.
-5. If neither row exists, it returns `404`.
-6. The response also sets a generic `User-Agent`, `Accept` and
+2. `repo.get_channel_by_name(name)` returns the row.
+3. `sources.parse_source(url)` selects the handler:
+   - http(s) → `yt-dlp` path: `redirect_url` is returned as `302`; an
+     unresolved row falls back to the `placeholder` channel, then `404`;
+   - `acestream://<40 hex>` → `302` to
+     `<acexy origin>/ace/getstream?id=<hash>`; a missing/incorrect origin is
+     `503` (no `placeholder` fallback); malformed sources fall through to the
+     placeholder path and are logged;
+4. The `acexy` origin is `ACEXY_BASE_URL` if set, otherwise
+   `http://{TAILSCALE_IP}:{ACEXY_PORT}`; the client must be able to reach it.
+5. The response also sets a generic `User-Agent`, `Accept` and
    `Connection: keep-alive`; these are response headers, not a proxy.
 
 ### `GET /play/{channel}/upd`
 
 `config.update_special_channel(name, appContext)` loads all channels, forces a
-resolution for the requested name and writes changed rows back. The endpoint
-returns `200 text/plain` even if the resolver failed; failures are logged.
+resolution for the requested name and writes changed rows back. Only http(s)
+sources are resolved; an ACE channel (or any non-yt-dlp source) returns
+`200 text/plain` with "nothing to resolve".
 
 ### `GET /health`
 
@@ -60,17 +67,21 @@ work.
 
 `admin_routes.py` exposes one resource, `/admin/channels`:
 
-- list with name, source URL, quality, redirect state, TTL badge, created;
-- add/edit with a quality preset or a custom yt-dlp format selector;
+- list with name, kind badge, source, quality, redirect state, TTL badge,
+  created;
+- add/edit with a single Source field: an http(s) URL, `acestream://<40 hex>`,
+  or a bare 40-hex content id (normalized to `acestream://`);
+- for http(s) sources: a quality preset or a custom yt-dlp format selector, and
+  an optional redirect override; those fields are hidden for ACE sources;
 - delete (POST, confirmation in the template);
-- `Update now` per channel: starts `update_special_channel()` in the
-  background and redirects immediately (a resolve can take up to 60 s);
+- `Update now` per channel (hidden for ACE): starts
+  `update_special_channel()` in the background and redirects immediately;
 - `Sync all`: starts `sync_channels()` in the background.
 
-After add, and after an edit that changed the URL or format, the handler starts
-a background resolve. The TTL badge is computed by `ttl.ttl_state()`:
-`eternal` for `-1`, `valid` with a human duration, `expired`, or `unknown` for
-`NULL`.
+After add, and after an edit that changed the URL, format or source scheme,
+the handler starts a background resolve for yt-dlp sources. Changing the source
+scheme on edit resets `format`, `redirect_url` and `ttl`. The TTL badge is
+computed by `ttl.ttl_state()`; ACE rows show `n/a`.
 
 The admin UI is deliberately unauthenticated because the published port is
 bound to the Tailscale IP. Do not expose it on the LAN or the internet.
@@ -85,9 +96,10 @@ bound to the Tailscale IP. Do not expose it on the LAN or the internet.
   ffmpeg.
 - `run_in_process_with_timeout()` runs the resolver in a `multiprocessing`
   process and polls the queue; the default timeout is 60 seconds.
-- `resolve_channels()` uses a semaphore of 2 (`MAX_PROCESSES`) and
-  deduplicates by `(source URL, format)`, so two channels with the same URL and
-  different quality resolve independently.
+- `resolve_channels()` filters to http(s) sources, uses a semaphore of 2
+  (`MAX_PROCESSES`) and deduplicates by `(source URL, format)`, so two channels
+  with the same URL and different quality resolve independently. ACE sources
+  (`acestream://`) never reach the resolver.
 - `run_in_process_with_timeout()` returns `(url, format, link)`;
   `resolve_channels()` and the worker must keep that triple in sync (covered by
   `tests/test_resolver.py`).
@@ -95,8 +107,9 @@ bound to the Tailscale IP. Do not expose it on the LAN or the internet.
   forces an update. A successful resolution extracts an expiry from the URL
   (`expire=`, `validto=`, or similar) and stores it in `ttl`.
 - `update_channels()` writes only rows marked `dirty`.
-- Logs never contain source or resolved URLs (they may carry tokens); errors
-  are sanitised and only channel names/ttl are logged.
+- Logs never contain source or resolved URLs or ACE content ids (they may
+  carry tokens or private ids); errors are sanitised and only channel
+  names/ttl are logged.
 
 The resolver is deliberately out-of-process: `yt-dlp` is synchronous, can block
 for seconds and can spawn its own work. Running it inline would block the
@@ -119,14 +132,19 @@ channels (
 )
 ```
 
-`format` is a nullable per-channel yt-dlp selector; empty means the default.
-`redirect_url` is the resolved (or manually overridden) 302 target. `ttl` is the
-expiry extracted from the resolved URL, `-1` for eternal, `NULL` for unknown.
+`url` is the source URI: an http(s) URL for `yt-dlp`, or the native
+`acestream://<40 hex>` URI for ACE playback. `format` is a nullable per-channel
+yt-dlp selector; empty means the default and it is `NULL` for ACE.
+`redirect_url` is the resolved (or manually overridden) 302 target and is
+`NULL` for ACE. `ttl` is the expiry extracted from the resolved URL, `-1` for
+eternal, `NULL` for unknown or ACE.
 
 There are **no migrations** and the old `proxies.db` is obsolete. The
 single-table model was a clean start: a fresh database contains only
 `channels`; the previous `redirect_channels`/`ace_channels` data was not
-migrated and the old file was deleted per environment after the rollout.
+migrated and the old file was deleted per environment after the rollout. ACE
+playback returned later as a source scheme in the same table — no second table
+and no schema change.
 
 ## Deployment topology
 
@@ -138,8 +156,8 @@ Ansible defines two independent environments in
 | app | `ytaceproxy-prod` | `ytaceproxy-dev` |
 | branch | `main` | `dev` |
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
-| acestream (unused by the app) | `6878` | `6879` |
-| acexy (unused by the app) | `8090` | `8091` |
+| acestream (used by ACE channels) | `6878` | `6879` |
+| acexy (used by ACE channels) | `8090` | `8091` |
 | data | `/var/lib/ytaceproxy-prod` | `/var/lib/ytaceproxy-dev` |
 | backups | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 
@@ -176,10 +194,16 @@ containers.
 - Every service uses the `json-file` log driver with `max-size=10m` and
   `max-file=3`; the wrapper policy enforces it.
 
-## ACE removal
+## ACE sources
 
-The `/ace/{name}` route, `ace_channels` table, ACE admin pages, content-id
-validation and `ACEXY_BASE_URL` were removed because ACE playback is not used.
-The `acestream`/`acexy` containers remain deployed but idle. Moving them to a
-host-level Docker project or removing them is a deferred decision in
-[roadmap.md](roadmap.md).
+ACE playback is a source scheme, not a separate route or table: a channel whose
+`url` is `acestream://<40 hex>` is redirected to
+`<acexy origin>/ace/getstream?id=<hash>`. There is no `/ace` route and no
+`ace_channels` table. `ACEXY_BASE_URL` is an optional override; by default the
+origin is `http://{TAILSCALE_IP}:{ACEXY_PORT}` from the host `.env`. ACE
+channels are never resolved by `yt-dlp`; the admin hides quality/override/update
+controls for them.
+
+The `acestream`/`acexy` companions are part of the deployed stack again. Moving
+them to a host-level Docker project remains a deferred roadmap decision; only
+the "remove entirely" option is off the table while ACE channels exist.

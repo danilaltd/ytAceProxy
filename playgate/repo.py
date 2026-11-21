@@ -25,6 +25,18 @@ async def get_channel_by_id(id_: int) -> Channel | None:
             return Channel(**dict(row)) if row else None
 
 
+async def get_channel_by_name(name: str) -> Channel | None:
+    async with aiosqlite.connect(db.DB_PATH) as connection:
+        connection.row_factory = aiosqlite.Row
+        async with connection.execute(
+            "SELECT id, name, url, format, redirect_url, ttl, created_at "
+            "FROM channels WHERE name = ?",
+            (name,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return Channel(**dict(row)) if row else None
+
+
 async def get_redirect_url(name: str) -> str | None:
     async with (
         aiosqlite.connect(db.DB_PATH) as connection,
@@ -65,6 +77,16 @@ async def update_channel(channel: Channel):
                 channel.redirect_url,
                 channel.id,
             ),
+        )
+        await connection.commit()
+
+
+async def reset_channel_resolution(id_: int):
+    async with aiosqlite.connect(db.DB_PATH) as connection:
+        await connection.execute(
+            "UPDATE channels SET format = NULL, redirect_url = NULL, ttl = NULL "
+            "WHERE id = ?",
+            (id_,),
         )
         await connection.commit()
 

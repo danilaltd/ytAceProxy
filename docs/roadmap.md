@@ -6,8 +6,9 @@ than kept as a changelog.
 Done:
 
 - migrated dependency management and the image build to `uv`;
-- removed the ACE playback path entirely: `/ace`, `ace_channels`,
-  `ACEXY_BASE_URL` and the ACE admin pages;
+- removed the old ACE path (`/ace`, `ace_channels`, `ACEXY_BASE_URL`) and
+  later reintroduced named ACE channels as an `acestream://<40-hex>` source
+  scheme in the single `channels` table (no second table, no `kind` column);
 - replaced the two tables with one `channels` table in a new
   `/app/data/channels.db` (clean start, no migration; old `proxies.db` removed
   per environment);
@@ -36,13 +37,13 @@ the resolver, keep it that way.
 
 ## 2. Decide the fate of the acestream/acexy companions
 
-The `/ace` route is gone and nothing in the manager references these services,
-but the compose still ships and publishes them (host ports `6878/6879` and
+ACE channels now use these services through `acexy`, so they are no longer
+idle. The compose still ships and publishes them (host ports `6878/6879` and
 `8090/8091`). Options:
 
 1. move `acestream` + `acexy` to a host-level Docker compose managed by
    Ansible (leaning, **deferred, not decided**);
-2. remove them from the stack entirely;
+2. remove them from the stack — only if ACE playback is dropped again;
 3. keep them as they are.
 
 Any option changes the exact manifest image set, the wrapper allowlist, the

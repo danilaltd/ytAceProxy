@@ -1,5 +1,7 @@
 from wtforms import Form, SelectField, StringField, validators
 
+from .sources import normalize_source_input
+
 FORMAT_CHOICES = [
     ("", "Default (best with audio)"),
     ("best[acodec!=none]", "best[acodec!=none]"),
@@ -21,6 +23,13 @@ def no_merge_format(form, field):
         raise validators.ValidationError("format is too long (max 64)")
 
 
+def valid_source(form, field):
+    try:
+        field.data = normalize_source_input(field.data or "")
+    except ValueError as exc:
+        raise validators.ValidationError(str(exc)) from exc
+
+
 class ChannelForm(Form):
     name = StringField(
         "Name",
@@ -33,7 +42,7 @@ class ChannelForm(Form):
             ),
         ],
     )
-    url = StringField("Source URL", [validators.DataRequired()])
+    url = StringField("Source", [validators.DataRequired(), valid_source])
     format = SelectField("Quality", choices=FORMAT_CHOICES, default="")
     format_custom = StringField(
         "Custom format",
@@ -47,7 +56,6 @@ class ChannelForm(Form):
 
 def normalize_channel_form(form: ChannelForm) -> None:
     form.name.data = (form.name.data or "").strip()
-    form.url.data = (form.url.data or "").strip()
     form.format_custom.data = (form.format_custom.data or "").strip()
     form.redirect_url.data = (form.redirect_url.data or "").strip()
 

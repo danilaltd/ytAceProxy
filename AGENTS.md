@@ -125,14 +125,14 @@ ssh asus@debian "sudo jq -r .release /var/lib/deploy/ytaceproxy-prod/manifest.js
 client ──GET /play/<name>───▶ manager :80 (aiohttp)
                                   │
                                   ├─ channels in /app/data/channels.db
-                                  └─ yt-dlp subprocess (timeout 60 s)
-                                  │
-                                  └─ 302 Location ──▶ client
+                                  ├─ source http(s) ──▶ yt-dlp subprocess (60 s)
+                                  │                         └─ 302 direct URL
+                                  └─ source acestream://hash ──▶ 302 ──▶ acexy
+                                                                        └─▶ acestream
 ```
 
-The deployed compose still contains `acestream` and `acexy`, but the manager
-does not reference them. The manager never streams video: it only resolves a
-URL and redirects.
+The deployed compose contains `acestream` and `acexy`; ACE channels use them
+through `acexy`. The manager never streams video: it only resolves or redirects.
 
 ## Git workflow
 
@@ -187,18 +187,22 @@ Read these before changing anything.
 3. **Schema is auto-created, not migrated.** `init_db()` runs
    `CREATE TABLE IF NOT EXISTS`. There is no migration framework. A schema
    change is a deploy-time risk; take a backup before deploying.
-4. **`channels` is the only table.** ACE tables and content ids are gone. Do
-   not reintroduce `/ace`, `ace_channels` or `ACEXY_BASE_URL` silently.
-5. **Unknown channel falls back to `placeholder`.** If neither the channel nor
-   `placeholder` has a `redirect_url`, `/play/{name}` returns 404. Do not
-   change this contract silently.
+4. **`channels` is the only table.** ACE playback is supported by storing the
+   native `acestream://<40 hex>` URI in `url`; the scheme selects the handler.
+   Do not add a second table or a `kind` column. `ACEXY_BASE_URL` is only an
+   optional override; the default origin is computed from `TAILSCALE_IP` and
+   `ACEXY_PORT`.
+5. **Unknown/unresolved yt-dlp channel falls back to `placeholder`.** If
+   neither the channel nor `placeholder` has a `redirect_url`, `/play/{name}`
+   returns 404. An ACE channel never falls back to `placeholder`: a
+   misconfigured acexy returns 503. Do not change these contracts silently.
 6. **URL resolution is out-of-process.** `yt-dlp` runs in a separate process
    with a 60-second timeout and a concurrency limit of 2. Never call
    `yt-dlp` inline in the event loop. `run_in_process_with_timeout()` returns
    `(url, format, link)`; keep `tests/test_resolver.py` green.
-7. **Per-channel quality uses `channels.format`.** Dedup is by
-   `(source URL, format)`. Merge selectors (`+`) are rejected: the image has no
-   ffmpeg.
+7. **Per-channel quality uses `channels.format` and applies only to http(s)
+   sources.** Dedup is by `(source URL, format)`. Merge selectors (`+`) are
+   rejected: the image has no ffmpeg.
 8. **Admin UI is tailnet-only.** There is no basic auth and no production
    approval. Do not add a public bind or an auth bypass.
 9. **CI ships image digests and the compose shape.** The server compose is
@@ -217,8 +221,9 @@ Read these before changing anything.
 13. **Do not restore the old `proxies.db` or `channels.db`.** Both are from
     older designs (`redirect_channels`/`ace_channels` and the JSON-era store);
     the current database is `/app/data/channels.db` with the `channels` table.
-14. **Logs never contain source or resolved URLs.** They can carry tokens. Log
-    channel names, TTL and sanitised errors only.
+14. **Logs never contain source/resolved URLs or ACE content ids.** They can
+    carry tokens or private ids. Log channel names, TTL and sanitised errors
+    only.
 
 ## Commands
 
@@ -275,6 +280,7 @@ cd arch2debian
 | Change | Touch |
 |---|---|
 | redirect behaviour / new route | `playgate/handler.py`, `playgate/app.py`, `tests/`, push `dev` |
+| ACE source parsing / acexy URL | `playgate/sources.py`, `playgate/ace.py`, `playgate/handler.py` |
 | channel schema / queries | `playgate/db.py`, `playgate/repo.py`, `playgate/models.py`, `post-deploy.sh.j2`, backup |
 | resolver format/timeout/concurrency | `playgate/config.py` |
 | quality selector / form validation | `playgate/forms.py` |

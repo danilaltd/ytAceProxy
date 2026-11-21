@@ -14,6 +14,7 @@ from aiohttp.web_response import StreamResponse
 from .admin_routes import routes
 from .db import init_db
 from .handler import channel_handler, channel_upd_handler, health_handler
+from .sources import source_kind
 from .state import appContext
 from .ttl import ttl_state
 
@@ -43,6 +44,7 @@ async def prefix_context_processor(request: Request) -> dict[str, Any]:
         "app_prefix": request.get("app_prefix", ""),
         "url_for": url_for,
         "ttl_state": ttl_state,
+        "source_kind": source_kind,
     }
 
 

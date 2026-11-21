@@ -153,6 +153,7 @@ async def test_add_channel_rejects_url_separators_in_name(aiohttp_client, app):
 async def test_edit_channel_updates_fields(aiohttp_client, app):
     await repo.add_channel("nsf", "http://source", "http://target", -1, None)
     channel = (await repo.get_channels())[0]
+    assert channel.id is not None
     client = await aiohttp_client(app)
 
     response = await client.post(
@@ -233,3 +234,163 @@ async def test_unknown_edit_id_returns_404(aiohttp_client, app):
     response = await client.get("/admin/channels/999/edit")
 
     assert response.status == 404
+
+
+HASH = "a" * 40
+
+
+async def test_add_ace_channel_from_uri(aiohttp_client, app):
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        "/admin/channels/add",
+        data={
+            "name": "ace1",
+            "url": f"acestream://{HASH.upper()}",
+            "format": "best",
+            "format_custom": "",
+            "redirect_url": "http://ignored",
+        },
+        allow_redirects=False,
+    )
+
+    assert response.status == 302
+    channel = (await repo.get_channels())[0]
+    assert channel.url == f"acestream://{HASH}"
+    assert channel.format is None
+    assert channel.redirect_url is None
+
+
+async def test_add_ace_channel_from_bare_hash(aiohttp_client, app):
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        "/admin/channels/add",
+        data={
+            "name": "ace1",
+            "url": f"  {HASH.upper()}  ",
+            "format": "",
+            "format_custom": "",
+            "redirect_url": "",
+        },
+        allow_redirects=False,
+    )
+
+    assert response.status == 302
+    channel = (await repo.get_channels())[0]
+    assert channel.url == f"acestream://{HASH}"
+
+
+async def test_add_channel_rejects_unknown_source(aiohttp_client, app):
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        "/admin/channels/add",
+        data={
+            "name": "bad",
+            "url": "ftp://example.com/x",
+            "format": "",
+            "format_custom": "",
+            "redirect_url": "",
+        },
+        allow_redirects=False,
+    )
+
+    assert response.status == 200
+    assert "Source must be" in await response.text()
+    assert await repo.get_channels() == []
+
+
+async def test_edit_yt_dlp_to_ace_resets_resolution(aiohttp_client, app, monkeypatch):
+    calls = []
+
+    async def fake_update(name, context=None):
+        calls.append(name)
+
+    monkeypatch.setattr(admin_routes, "update_special_channel", fake_update)
+    await repo.add_channel("nsf", "http://source", "http://old", 1893456000, "best")
+    channel = (await repo.get_channels())[0]
+    assert channel.id is not None
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        f"/admin/channels/{channel.id}/edit",
+        data={
+            "name": "nsf",
+            "url": f"acestream://{HASH}",
+            "format": "best",
+            "format_custom": "",
+            "redirect_url": "",
+        },
+        allow_redirects=False,
+    )
+    await asyncio.sleep(0)
+
+    assert response.status == 302
+    updated = await repo.get_channel_by_id(channel.id)
+    assert updated is not None
+    assert updated.url == f"acestream://{HASH}"
+    assert updated.format is None
+    assert updated.redirect_url is None
+    assert updated.ttl is None
+    assert calls == []
+
+
+async def test_edit_same_scheme_preserves_ttl(aiohttp_client, app, monkeypatch):
+    async def fake_update(name, context=None):
+        return None
+
+    monkeypatch.setattr(admin_routes, "update_special_channel", fake_update)
+    await repo.add_channel("nsf", "http://source", "http://old", 1893456000, "best")
+    channel = (await repo.get_channels())[0]
+    assert channel.id is not None
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        f"/admin/channels/{channel.id}/edit",
+        data={
+            "name": "renamed",
+            "url": "http://new-source",
+            "format": "best",
+            "format_custom": "",
+            "redirect_url": "http://old",
+        },
+        allow_redirects=False,
+    )
+
+    assert response.status == 302
+    updated = await repo.get_channel_by_id(channel.id)
+    assert updated is not None
+    assert updated.name == "renamed"
+    assert updated.ttl == 1893456000
+
+
+async def test_update_now_skips_ace(aiohttp_client, app, monkeypatch):
+    calls = []
+
+    async def fake_update(name, context=None):
+        calls.append(name)
+
+    monkeypatch.setattr(admin_routes, "update_special_channel", fake_update)
+    await repo.add_channel("ace1", f"acestream://{HASH}", None, None, None)
+    channel = (await repo.get_channels())[0]
+    client = await aiohttp_client(app)
+
+    response = await client.post(
+        f"/admin/channels/{channel.id}/update",
+        allow_redirects=False,
+    )
+
+    assert response.status == 302
+    assert response.headers["Location"] == "/admin/channels?msg=not-resolvable"
+    assert calls == []
+
+
+async def test_channels_page_marks_ace_kind(aiohttp_client, app):
+    await repo.add_channel("ace1", f"acestream://{HASH}", None, None, None)
+    client = await aiohttp_client(app)
+
+    response = await client.get("/admin/channels")
+
+    assert response.status == 200
+    assert "ACE" in await response.text()

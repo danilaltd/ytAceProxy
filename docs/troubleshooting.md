@@ -261,6 +261,32 @@ Merge selectors (`bestvideo+bestaudio` and anything with `+`) need ffmpeg,
 which the image does not include. Use a single-format selector such as
 `best[height<=720]`. The add/edit form rejects `+` for this reason.
 
+### An ACE channel returns 503
+
+The manager could not build the acexy origin. It uses
+`http://{TAILSCALE_IP}:{ACEXY_PORT}` by default (or `ACEXY_BASE_URL` if set).
+Check:
+
+```bash
+ssh asus@debian "sudo docker exec ytaceproxy-prod-manager-1 printenv TAILSCALE_IP ACEXY_PORT ACEXY_BASE_URL"
+```
+
+Both names are in the `.env` contract; if they are empty, re-run `31_apps
+-e env=dev|prod` (or fix the compose release). Do not edit `/srv` by hand.
+
+### The admin rejects an ACE source
+
+Accepted forms are `acestream://<40 hex characters>`, a bare 40-hex content id,
+or an http(s) URL. A bad length/non-hex id, a path/query on the acestream URI,
+or another scheme (`ftp://`, `ace://`) is rejected. The stored form is always
+`acestream://<lowercase hash>`.
+
+### An ACE channel returns 404 after an image rollback
+
+Older images (before the ACE source-scheme feature) treat `acestream://` rows as
+unresolved yt-dlp channels, so `/play/<name>` falls back to `placeholder` or
+404. Redeploy the newer release; the database is unchanged.
+
 ### The player still points at `/yt_dlp`
 
 The old route is removed. Update the playlist/player URLs to `/play/<name>`;

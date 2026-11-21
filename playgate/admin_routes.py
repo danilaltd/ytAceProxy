@@ -19,8 +19,10 @@ from .repo import (
     delete_channel,
     get_channel_by_id,
     get_channels,
+    reset_channel_resolution,
     update_channel,
 )
+from .sources import KIND_ACE, KIND_YT_DLP, parse_source
 from .state import appContext
 
 routes = web.RouteTableDef()
@@ -31,6 +33,7 @@ MESSAGES = {
     "deleted": "Channel deleted.",
     "update-started": "Refresh started in the background.",
     "sync-started": "Sync started in the background.",
+    "not-resolvable": "Channel is not a yt-dlp source; nothing to resolve.",
 }
 
 _background_tasks: set[asyncio.Task[None]] = set()
@@ -88,13 +91,15 @@ async def add_channel_handler(request: web.Request):
     normalize_channel_form(form)
 
     if form.validate():
+        source = parse_source(form.url.data)
+        is_ace = source is not None and source.kind == KIND_ACE
         try:
             await add_channel(
                 form.name.data,
                 form.url.data,
-                form.redirect_url.data or None,
+                None if is_ace else (form.redirect_url.data or None),
                 None,
-                effective_format(form),
+                None if is_ace else effective_format(form),
             )
         except sqlite3.IntegrityError:
             # WTForms stubs type Field.errors as tuple[()]; it is a list at runtime.
@@ -103,7 +108,8 @@ async def add_channel_handler(request: web.Request):
                 "A channel with this name already exists",
             ]
         else:
-            _spawn(update_special_channel(form.name.data, appContext))
+            if not is_ace:
+                _spawn(update_special_channel(form.name.data, appContext))
             raise _redirect(request, "/admin/channels", "added")
 
     return _render_form(request, form, "Add channel")
@@ -136,14 +142,22 @@ async def edit_channel_handler(request: web.Request):
     normalize_channel_form(form)
 
     if form.validate():
+        source = parse_source(form.url.data)
+        old_source = parse_source(existing.url)
+        is_ace = source is not None and source.kind == KIND_ACE
+        kind_changed = (old_source.kind if old_source else None) != (
+            source.kind if source else None
+        )
         updated = Channel(
             id=channel_id,
             name=form.name.data,
             url=form.url.data,
-            redirect_url=form.redirect_url.data or None,
-            format=effective_format(form),
+            redirect_url=None if is_ace else (form.redirect_url.data or None),
+            format=None if is_ace else effective_format(form),
         )
         try:
+            if kind_changed:
+                await reset_channel_resolution(channel_id)
             await update_channel(updated)
         except sqlite3.IntegrityError:
             # WTForms stubs type Field.errors as tuple[()]; it is a list at runtime.
@@ -152,8 +166,10 @@ async def edit_channel_handler(request: web.Request):
                 "A channel with this name already exists",
             ]
         else:
-            if existing.url != updated.url or (existing.format or "") != (
-                updated.format or ""
+            if not is_ace and (
+                kind_changed
+                or existing.url != updated.url
+                or (existing.format or "") != (updated.format or "")
             ):
                 _spawn(update_special_channel(updated.name, appContext))
             raise _redirect(request, "/admin/channels", "updated")
@@ -172,6 +188,10 @@ async def update_channel_handler(request: web.Request):
     channel = await get_channel_by_id(_channel_id(request))
     if channel is None:
         raise web.HTTPNotFound()
+
+    source = parse_source(channel.url)
+    if source is None or source.kind != KIND_YT_DLP:
+        raise _redirect(request, "/admin/channels", "not-resolvable")
 
     _spawn(update_special_channel(channel.name, appContext))
     raise _redirect(request, "/admin/channels", "update-started")

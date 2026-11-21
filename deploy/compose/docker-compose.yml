@@ -11,6 +11,10 @@ services:
       - "${MANAGER_BIND:?MANAGER_BIND is required}:${MANAGER_PORT:?MANAGER_PORT is required}:80"
     volumes:
       - "${DATA_DIR:?DATA_DIR is required}/manager-data:/app/data"
+    environment:
+      # Client-facing acexy origin for /play ACE channels.
+      ACEXY_PORT: "${ACEXY_PORT:?ACEXY_PORT is required}"
+      TAILSCALE_IP: "${TAILSCALE_IP:?TAILSCALE_IP is required}"
     labels:
       # The wrapper policy checks published binds against this address.
       io.arch2debian.tailscale-ip: "${TAILSCALE_IP:?TAILSCALE_IP is required}"

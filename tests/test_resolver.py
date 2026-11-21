@@ -163,3 +163,40 @@ def test_safe_error_strips_urls():
         config._safe_error(RuntimeError("see https://x.example/y?token=1 now"))
         == "see <url> now"
     )
+
+
+HASH = "a" * 40
+
+
+async def test_sync_channels_skips_ace_sources(app, monkeypatch):
+    calls = []
+
+    async def fake_resolve(url, fmt, stop_event, timeout=60):
+        calls.append(url)
+        return url, fmt, RESOLVED
+
+    monkeypatch.setattr(config, "run_in_process_with_timeout", fake_resolve)
+    await repo.add_channel("yt", "http://source", None, None, None)
+    await repo.add_channel("ace1", f"acestream://{HASH}", None, None, None)
+
+    await config.sync_channels()
+
+    assert calls == ["http://source"]
+    ace = await repo.get_channel_by_name("ace1")
+    assert ace is not None
+    assert ace.redirect_url is None
+
+
+async def test_update_special_channel_on_ace_is_noop(app, monkeypatch):
+    calls = []
+
+    async def fake_resolve(url, fmt, stop_event, timeout=60):
+        calls.append(url)
+        return url, fmt, RESOLVED
+
+    monkeypatch.setattr(config, "run_in_process_with_timeout", fake_resolve)
+    await repo.add_channel("ace1", f"acestream://{HASH}", None, None, None)
+
+    await config.update_special_channel("ace1", appContext)
+
+    assert calls == []

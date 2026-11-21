@@ -54,7 +54,7 @@ never starts application containers; `31_apps` never writes compose.
 | SQLite | `.../manager-data/channels.db` | `.../manager-data/channels.db` |
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
 | acestream (unused by the app) | `6878` | `6879` |
-| acexy (unused by the app) | `8090` | `8091` |
+| acexy (used by ACE channels) | `8090` | `8091` |
 | backup | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 | manifest/log | `/var/lib/deploy/<app>`, `/var/log/deploy/<app>.log` | same pattern |
 
@@ -309,6 +309,8 @@ curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/hea
 curl -sS -o /dev/null -w '%{http_code}\n' http://<tailnet-ip>:<manager-port>/admin/channels
 curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
   http://<tailnet-ip>:<manager-port>/play/<channel>
+curl -sS -o /dev/null -w '%{http_code} %{redirect_url}\n' \
+  http://<tailnet-ip>:<manager-port>/play/<ace-channel>
 
 # 5. backup
 ssh asus@debian "sudo ls -lt /var/backups/ytaceproxy/$ENV/ | head"
@@ -322,7 +324,8 @@ The acceptance criteria are: the manifest has exactly `manager`, `acestream`,
 `acexy` and the three `config` keys; the compose file hash equals
 `config.compose_sha256`; `required_env` is present in `.env`; the policy
 passes; the manager is healthy; `/health` answers 200; `/admin/channels`
-answers; a known `/play` channel is 302; a pre-deploy backup exists; running
+answers; a known yt-dlp `/play` channel is 302; a known ACE `/play` channel is
+302 to the environment's acexy port; a pre-deploy backup exists; running
 images equal the manifest digests.
 
 ## 7. Rollback
@@ -368,7 +371,13 @@ deliberate wipe: a pre-change backup contains the old `proxies.db` with
 - Logs are capped per container (`json-file`, 10 MB × 3).
 - Memory limits are intentionally not set; measured usage is far below the
   host limit.
-- The `acestream`/`acexy` companions still run but nothing in the app uses
-  them; removing or relocating them is a deferred roadmap decision.
+- The manager reads `ACEXY_PORT` and `TAILSCALE_IP` from `.env` to build the
+  client-facing acexy origin for ACE channels. Both names already exist in the
+  `.env` contract; no Ansible change is needed. `ACEXY_BASE_URL` is an optional
+  manual override.
+- The `acestream`/`acexy` companions serve ACE channels through acexy; moving
+  them to a host-level Docker project remains a deferred roadmap decision.
+- On an image rollback, ACE channels are seen by the old code as unresolved
+  yt-dlp rows and fall back to `placeholder`/404; no data is lost.
 - The old single-stack `/srv/ytaceproxy` and `/var/lib/danilaltd-ytaceproxy-dev`
   are not used by the current deployment.

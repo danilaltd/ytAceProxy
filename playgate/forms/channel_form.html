@@ -10,10 +10,16 @@
     {{ form.name(id="name") }}
     {% if form.name.errors %}<div class="error">{{ form.name.errors[0] }}</div>{% endif %}
 
-    <label for="url">Source URL</label>
+    <label for="url">Source</label>
     {{ form.url(id="url") }}
+    <div class="hint">
+        An http(s) URL for yt-dlp, or <code>acestream://&lt;40 hex&gt;</code> for ACE playback.
+        A bare 40-character content id is also accepted.
+    </div>
     {% if form.url.errors %}<div class="error">{{ form.url.errors[0] }}</div>{% endif %}
 
+    {% set kind = source_kind(form.url.data) %}
+    {% if kind != 'ace' %}
     <label for="format">Quality</label>
     {{ form.format(id="format") }}
     {% if form.format.errors %}<div class="error">{{ form.format.errors[0] }}</div>{% endif %}
@@ -27,6 +33,11 @@
     {{ form.redirect_url(id="redirect_url") }}
     <div class="hint">If set, <code>/play/&lt;name&gt;</code> returns this URL instead of the resolved one.</div>
     {% if form.redirect_url.errors %}<div class="error">{{ form.redirect_url.errors[0] }}</div>{% endif %}
+    {% else %}
+    <div class="hint">
+        ACE sources are redirected to <code>acexy</code>; quality, redirect override and TTL do not apply.
+    </div>
+    {% endif %}
 
     <div class="form-actions">
         <button type="submit">Save</button>

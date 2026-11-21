@@ -35,8 +35,8 @@ run. Session start, Git rules and live-state commands are in
 
 | Method | Path | Behaviour |
 |---|---|---|
-| GET | `/play/{channel}` | 302 to the stored `redirect_url`; falls back to the `placeholder` channel; otherwise 404 |
-| GET | `/play/{channel}/upd` | re-resolves one channel now; returns `200 text/plain` |
+| GET | `/play/{channel}` | 302 by source scheme: an http(s) source returns the stored `redirect_url` (or `placeholder` → 404); an `acestream://<hash>` source redirects to `acexy` (503 if it is not configured) |
+| GET | `/play/{channel}/upd` | re-resolves a yt-dlp channel now; ACE channels return `200 text/plain` no-op |
 | GET | `/health` | 200 `ok` when SQLite and `channels` are readable; 503 otherwise; used by the manager healthcheck |
 | GET | `/admin` | redirects to `/admin/channels` |
 | GET | `/admin/channels` | admin list: add, edit, delete, update now, sync all |
@@ -47,9 +47,9 @@ run. Session start, Git rules and live-state commands are in
 | POST | `/admin/channels/sync` | re-resolve all channels in the background |
 
 The manager never proxies video: it returns a 302 and the media connection is
-between the client and the origin server. `/ace` and the ACE content-id storage
-were removed; the `acestream`/`acexy` companion containers still deploy but are
-not referenced by the application (their fate is an open roadmap decision).
+between the client and the origin server. ACE channels store the native
+`acestream://<40-hex>` URI as their source and redirect to the `acexy` companion
+(the scheme selects the handler); there is no separate `/ace` route or table.
 
 ## Data
 
@@ -62,10 +62,10 @@ startup from `playgate/db.py`.
 |---|---|
 | `id` | primary key |
 | `name` | unique channel name used in `/play/{name}` |
-| `url` | source URL passed to `yt-dlp` |
-| `format` | optional per-channel yt-dlp format selector; empty means `best[acodec!=none]` |
-| `redirect_url` | resolved URL returned as a 302 (or a manual override) |
-| `ttl` | expiry timestamp extracted from the resolved URL; `-1` means eternal; `NULL` unknown |
+| `url` | source URI: an http(s) URL for `yt-dlp`, or `acestream://<40 hex>` for ACE playback |
+| `format` | optional per-channel yt-dlp format selector; empty means `best[acodec!=none]`; `NULL` for ACE |
+| `redirect_url` | resolved URL returned as a 302 (or a manual override); `NULL` for ACE |
+| `ttl` | expiry timestamp extracted from the resolved URL; `-1` means eternal; `NULL` unknown or ACE |
 | `created_at` | creation timestamp |
 
 There are no migrations. A fresh database gets exactly this table; an old
