@@ -16,7 +16,7 @@ Docker image and deployed as two independent stacks:
 | release | `prod-*` | `dev-*` |
 | compose/data | `/srv/ytaceproxy-prod`, `/var/lib/ytaceproxy-prod` | `/srv/ytaceproxy-dev`, `/var/lib/ytaceproxy-dev` |
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
-| acestream / acexy (unused by the app) | `6878` / `8090` | `6879` / `8091` |
+| acestream / acexy (ACE playback) | `6878` / `8090` | `6879` / `8091` |
 | backup | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 
 **Naming (scope decided 2026-11-20):** the code-level project is `playgate`
@@ -63,21 +63,25 @@ Canonical contract: `arch2debian/docs/deployment-contract.md`.
 
 ## Current state (snapshot: 2026-11-20)
 
-- Both stacks are healthy: `ytaceproxy-prod` release `prod-24` and
-  `ytaceproxy-dev` release `dev-23`, both compose `sha256 3dc0d3fd…`.
+- Both stacks are healthy: `ytaceproxy-prod` release `prod-26` and
+  `ytaceproxy-dev` release `dev-25`, both compose `sha256 7a9847ae…`.
 - The single-table `/play` model is deployed on both stacks; prod has 2
   channels, dev has 0. The old `proxies.db` was removed on both.
+- ACE channels are supported as `acestream://<40-hex>` sources in the same
+  table; `/play` redirects them to acexy at `http://{TAILSCALE_IP}:{ACEXY_PORT}`.
 - On 2026-11-20 a resolver unpack bug (worker returned 2 values, caller
   expected 3) briefly broke new channels and refreshes; fixed in `dev-19` /
   `prod-20`, covered by `tests/test_resolver.py`. The `test` job added in
   `dev-21` / `prod-22` and the `lint` job in `dev-23` / `prod-24` now gate
   the build.
-- `/ace`, `ace_channels`, `ACEXY_BASE_URL` and the ACE admin pages are removed.
-  The `acestream`/`acexy` containers still deploy but nothing in the app uses
-  them; their fate is a deferred roadmap decision.
+- ACE playback is a source scheme: `acestream://<40-hex>` lives in
+  `channels.url`; there is no `/ace` route, `ace_channels` table or `kind`
+  column. The `acestream`/`acexy` companions serve these channels; their fate
+  (host-level Docker) remains a deferred roadmap decision.
 - The SQLite file is `/app/data/channels.db` with one table, `channels`. The old
   `proxies.db` is obsolete and is deleted per environment after the rollout.
-- `verify_apps: true`; the last `40_verify` passed.
+- `verify_apps: true`; `40_verify` is red only on `rwwatcher-prod`
+  (pre-existing `provider-rwby` compose drift). All ytAceProxy checks pass.
 - Documentation-only pushes (`README.md`, `AGENTS.md`, `docs/**`) skip the
   release workflow; workflow/code/dependency changes still deploy.
 - Application documentation is complete: `README.md`, `AGENTS.md`,

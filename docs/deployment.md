@@ -53,14 +53,14 @@ never starts application containers; `31_apps` never writes compose.
 | data | `/var/lib/ytaceproxy-prod` | `/var/lib/ytaceproxy-dev` |
 | SQLite | `.../manager-data/channels.db` | `.../manager-data/channels.db` |
 | manager UI | `<tailnet-ip>:8088` | `<tailnet-ip>:8089` |
-| acestream (unused by the app) | `6878` | `6879` |
+| acestream (used by ACE channels) | `6878` | `6879` |
 | acexy (used by ACE channels) | `8090` | `8091` |
 | backup | `/var/backups/ytaceproxy/prod` | `/var/backups/ytaceproxy/dev` |
 | manifest/log | `/var/lib/deploy/<app>`, `/var/log/deploy/<app>.log` | same pattern |
 
 The two stacks share no database, cache, port or manifest and can run at the
-same time. Current releases are `prod-24` and `dev-23`, both compose
-`sha256 3dc0d3fd…`; the live value is in each manifest.
+same time. Current releases are `prod-26` and `dev-25`, both compose
+`sha256 7a9847ae…`; the live value is in each manifest.
 
 ## 3. Release flow
 

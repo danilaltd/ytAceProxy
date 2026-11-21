@@ -23,8 +23,8 @@ manifest.
 
 ## Current state
 
-Snapshot (2026-11-20): `ytaceproxy-dev` is `dev-23` and `ytaceproxy-prod` is
-`prod-24`; both run manifest v2 and compose `sha256 3dc0d3fd…`. The
+Snapshot (2026-11-20): `ytaceproxy-dev` is `dev-25` and `ytaceproxy-prod` is
+`prod-26`; both run manifest v2 and compose `sha256 7a9847ae…`. The
 single-table `/play` model is deployed on both stacks. Release numbers are a
 snapshot, not an invariant — check `/var/lib/deploy/<app>/manifest.json` or the latest `Release`
 run. Session start, Git rules and live-state commands are in
@@ -94,8 +94,8 @@ non-Docker run, mount or create that directory, or change `DB_PATH` in a local
 patch. Do not commit a local path change.
 
 The root `docker-compose.yml` is a local development stack (`manager`,
-`acestream`, `acexy`). The manager has no ACE configuration anymore; companions
-are kept only for local parity with the server.
+`acestream`, `acexy`). ACE channels need `TAILSCALE_IP` and `ACEXY_PORT` in the
+manager environment to build the acexy redirect; set them for local ACE tests.
 
 ## Docker
 
